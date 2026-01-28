@@ -19,11 +19,14 @@ from .utils.checkpoints import (
 try:
     from .training.trainer import BEATsTrainer
     from .core.config import Config
+    from .prediction import LongFormPredictor, create_long_form_predictor
 
     _TRAINING_AVAILABLE = True
 except ImportError:
     BEATsTrainer = None  # Avoid unused import warning
     Config = None
+    LongFormPredictor = None
+    create_long_form_predictor = None
     _TRAINING_AVAILABLE = False
 
 # Package metadata
@@ -50,4 +53,4 @@ __all__ = [
 
 # Add training components if available
 if _TRAINING_AVAILABLE:
-    __all__.extend(["BEATsTrainer", "Config"])
+    __all__.extend(["BEATsTrainer", "Config", "LongFormPredictor", "create_long_form_predictor"])

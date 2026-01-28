@@ -109,6 +109,128 @@ trainer = BEATsTrainer.from_split_csvs(
 trainer.train()
 ```
 
+## Audio Clip Duration Control
+
+BEATs trainer supports both variable-length audio (automatic padding) and fixed-length audio (manual duration control). This gives you precise control over memory usage and training consistency.
+
+### Variable Length (Default)
+
+```python
+from beats_trainer.core.config import Config, DataConfig
+
+config = Config(
+    data=DataConfig(
+        clip_duration=None,  # Default: variable length
+        batch_size=16
+    )
+)
+
+trainer = BEATsTrainer.from_directory("dataset", config=config)
+# Each batch will be padded to the longest clip in that batch
+```
+
+**Characteristics:**
+- Preserves original audio length
+- Dynamic padding per batch
+- Good for consistent-length datasets
+- May use more memory
+
+### Fixed Duration Clips
+
+Force all audio clips to be exactly the same length:
+
+```python
+config = Config(
+    data=DataConfig(
+        clip_duration=1.0,   # All clips will be exactly 1 second
+        sample_rate=16000,   # = 16,000 samples per clip
+        batch_size=32        # Can use larger batches with consistent size
+    )
+)
+
+trainer = BEATsTrainer.from_directory("dataset", config=config)
+```
+
+**What happens:**
+- **Longer audio**: Truncated to target duration (takes from beginning)
+- **Shorter audio**: Zero-padded to target duration
+- **Exact length**: No modification needed
+
+### Common Duration Configurations
+
+```python
+# Quick prototyping - very short clips
+config = Config(data=DataConfig(clip_duration=0.5, batch_size=64))
+
+# Standard short clips
+config = Config(data=DataConfig(clip_duration=1.0, batch_size=32))
+
+# Medium clips for detailed analysis  
+config = Config(data=DataConfig(clip_duration=3.0, batch_size=16))
+
+# Long clips for complex audio
+config = Config(data=DataConfig(clip_duration=10.0, batch_size=8))
+```
+
+### Memory and Performance
+
+| Clip Duration | Samples (16kHz) | Memory/Clip | Batch Size | Use Case |
+|---------------|-----------------|-------------|------------|-----------|
+| 0.5s          | 8,000          | ~32 KB     | 64-128     | Quick testing |
+| 1.0s          | 16,000         | ~64 KB     | 32-64      | Short sounds |
+| 2.0s          | 32,000         | ~128 KB    | 16-32      | Standard clips |
+| 5.0s          | 80,000         | ~320 KB    | 8-16       | Long analysis |
+| 10.0s         | 160,000        | ~640 KB    | 4-8        | Very long clips |
+
+### Choosing the Right Duration
+
+**Use shorter clips (0.5-2s) for:**
+- Quick prototyping
+- Simple classification tasks
+- Limited compute resources
+- Bird calls, alarms, brief sounds
+
+**Use longer clips (3-10s) for:**
+- Complex temporal patterns
+- Music analysis
+- Speech recognition
+- Environmental monitoring
+- Detailed acoustic analysis
+
+**Use variable length when:**
+- Your dataset has consistent clip lengths
+- You want to preserve all original audio
+- Memory usage is not a concern
+
+### Sample Rate Considerations
+
+Different sample rates affect the number of samples per clip:
+
+```python
+# High quality, short duration
+config = Config(data=DataConfig(
+    sample_rate=22050,    # High quality
+    clip_duration=1.0,    # = 22,050 samples
+    batch_size=16
+))
+
+# Standard quality, longer duration  
+config = Config(data=DataConfig(
+    sample_rate=16000,    # Standard
+    clip_duration=2.0,    # = 32,000 samples  
+    batch_size=16
+))
+
+# Lower quality, very long duration
+config = Config(data=DataConfig(
+    sample_rate=8000,     # Lower quality
+    clip_duration=4.0,    # = 32,000 samples
+    batch_size=16
+))
+```
+
+All three configurations above use the same memory per clip (~128KB) but provide different quality/duration trade-offs.
+
 ## Training Strategies
 
 ### Classification Head Only (Fast)

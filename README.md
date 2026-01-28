@@ -8,14 +8,16 @@
 - **🎵 Feature Extraction**: Extract high-quality audio embeddings
 - **🔧 Simple Training API**: Fine-tune BEATs with just a few lines of code
 - **🏗️ Train from Scratch**: Initialize and train BEATs without pre-trained weights
-- **📚 Comprehensive Documentation**: Step-by-step guides and examples
+- **� Long-Form Prediction**: Process long audio files with timestamped predictions
+- **�📚 Comprehensive Documentation**: Step-by-step guides and examples
 - **⚡ GPU Support**: Automatic CUDA detection and optimization
 
 ## 📖 Documentation
 
 - **[Installation & Setup](docs/installation.md)** - Complete installation guide
 - **[Feature Extraction](docs/feature_extraction.md)** - Extract audio embeddings
-- **[Training Guide](docs/training.md)** - Train models on custom datasets  
+- **[Training Guide](docs/training.md)** - Train models on custom datasets
+- **[Long-Form Prediction](docs/prediction.md)** - Process long audio files with timestamps
 - **[Example Notebooks](notebooks/README.md)** - Interactive tutorials
 - **[Example Scripts](example_scripts/)** - Ready-to-run code examples
 

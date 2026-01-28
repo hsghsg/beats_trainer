@@ -102,58 +102,117 @@ class BEATsFeatureExtractor:
             raise FileNotFoundError(f"Model not found at: {self.model_path}")
 
         # Load checkpoint
-        checkpoint = torch.load(self.model_path, map_location="cpu")
+        # weights_only=False is needed for custom trained checkpoints that include Config objects
+        checkpoint = torch.load(self.model_path, map_location="cpu", weights_only=False)
 
-        # Handle incomplete checkpoint configurations (like OpenBEATs)
-        checkpoint_cfg = checkpoint["cfg"]
-
-        # Define default configuration values for missing parameters
-        default_config = {
-            "encoder_layers": 12,
-            "encoder_embed_dim": 768,
-            "encoder_ffn_embed_dim": 3072,
-            "encoder_attention_heads": 12,
-            "activation_fn": "gelu",
-            "dropout": 0.1,
-            "attention_dropout": 0.1,
-            "activation_dropout": 0.1,
-            "encoder_layerdrop": 0.0,
-            "dropout_input": 0.1,
-            "layer_norm_first": False,
-            "conv_bias": False,
-            "conv_pos": 128,
-            "conv_pos_groups": 16,
-            "relative_position_embedding": True,
-            "num_buckets": 320,
-            "max_distance": 800,
-            "gru_rel_pos": True,
-            "deep_norm": True,
-            "input_patch_size": 16,  # Critical for OpenBEATs compatibility
-            "layer_wise_gradient_decay_ratio": 1.0,
-            "embed_dim": 512,
-        }
-
-        # Merge default config with checkpoint config (checkpoint values take precedence)
-        complete_cfg = {**default_config, **checkpoint_cfg}
-
-        # Create config for feature extraction (no classifier)
-        cfg = BEATsConfig(
-            {
-                **complete_cfg,
-                "finetuned_model": False,  # Remove classifier head
+        # Detect checkpoint type (PyTorch Lightning vs pretrained BEATs)
+        is_lightning_checkpoint = "state_dict" in checkpoint
+        
+        if is_lightning_checkpoint:
+            # Lightning checkpoint from BEATsTrainer
+            print("Detected PyTorch Lightning checkpoint")
+            
+            # Extract config from hyperparameters
+            hparams = checkpoint.get("hyper_parameters", {})
+            config_obj = hparams.get("config")
+            
+            if config_obj is None:
+                raise ValueError("Could not find config in Lightning checkpoint hyperparameters")
+            
+            # Build config dict from Config object
+            checkpoint_cfg = {
+                "encoder_layers": config_obj.model.encoder_layers,
+                "encoder_embed_dim": config_obj.model.encoder_embed_dim,
+                "encoder_ffn_embed_dim": config_obj.model.encoder_ffn_embed_dim,
+                "encoder_attention_heads": config_obj.model.encoder_attention_heads,
+                "activation_fn": "gelu",
+                "dropout": config_obj.model.dropout_rate,
+                "attention_dropout": 0.1,
+                "activation_dropout": 0.1,
+                "encoder_layerdrop": 0.0,
+                "dropout_input": 0.1,
+                "layer_norm_first": False,
+                "conv_bias": False,
+                "conv_pos": 128,
+                "conv_pos_groups": 16,
+                "relative_position_embedding": True,
+                "num_buckets": 320,
+                "max_distance": 800,
+                "gru_rel_pos": True,
+                "deep_norm": True,
+                "input_patch_size": config_obj.model.input_patch_size,
+                "layer_wise_gradient_decay_ratio": 1.0,
+                "embed_dim": 512,
+                "finetuned_model": False,  # Remove classifier head for feature extraction
             }
-        )
+            
+            # Create config
+            cfg = BEATsConfig(checkpoint_cfg)
+            
+            # Initialize model
+            self.model = BEATs(cfg)
+            
+            # Load state dict (Lightning stores model state under 'state_dict' key)
+            # Extract only backbone weights (exclude classifier head)
+            state_dict = checkpoint["state_dict"]
+            backbone_state = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
+            
+            self.model.load_state_dict(backbone_state, strict=False)
+            
+        else:
+            # Pretrained BEATs checkpoint
+            print("Detected pretrained BEATs checkpoint")
+            
+            # Handle incomplete checkpoint configurations (like OpenBEATs)
+            checkpoint_cfg = checkpoint["cfg"]
 
-        # Initialize model
-        self.model = BEATs(cfg)
+            # Define default configuration values for missing parameters
+            default_config = {
+                "encoder_layers": 12,
+                "encoder_embed_dim": 768,
+                "encoder_ffn_embed_dim": 3072,
+                "encoder_attention_heads": 12,
+                "activation_fn": "gelu",
+                "dropout": 0.1,
+                "attention_dropout": 0.1,
+                "activation_dropout": 0.1,
+                "encoder_layerdrop": 0.0,
+                "dropout_input": 0.1,
+                "layer_norm_first": False,
+                "conv_bias": False,
+                "conv_pos": 128,
+                "conv_pos_groups": 16,
+                "relative_position_embedding": True,
+                "num_buckets": 320,
+                "max_distance": 800,
+                "gru_rel_pos": True,
+                "deep_norm": True,
+                "input_patch_size": 16,  # Critical for OpenBEATs compatibility
+                "layer_wise_gradient_decay_ratio": 1.0,
+                "embed_dim": 512,
+            }
 
-        # Use the improved loading method
-        try:
-            self.model.reload_pretrained_parameters(state_dict=checkpoint["model"])
-        except Exception as e:
-            print(f"Warning: Failed to use reload_pretrained_parameters: {e}")
-            print("Falling back to standard loading...")
-            self.model.load_state_dict(checkpoint["model"], strict=False)
+            # Merge default config with checkpoint config (checkpoint values take precedence)
+            complete_cfg = {**default_config, **checkpoint_cfg}
+
+            # Create config for feature extraction (no classifier)
+            cfg = BEATsConfig(
+                {
+                    **complete_cfg,
+                    "finetuned_model": False,  # Remove classifier head
+                }
+            )
+
+            # Initialize model
+            self.model = BEATs(cfg)
+
+            # Use the improved loading method
+            try:
+                self.model.reload_pretrained_parameters(state_dict=checkpoint["model"])
+            except Exception as e:
+                print(f"Warning: Failed to use reload_pretrained_parameters: {e}")
+                print("Falling back to standard loading...")
+                self.model.load_state_dict(checkpoint["model"], strict=False)
 
         self.model.to(self.device)
         self.model.eval()
