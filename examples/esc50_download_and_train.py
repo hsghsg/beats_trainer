@@ -11,8 +11,7 @@ Run with:
     python examples/esc50_download_and_train.py
 """
 
-from beats_trainer import BEATsTrainer
-from beats_trainer.config import Config
+from beats_trainer import BEATsTrainer, Config
 
 
 def main():

@@ -22,7 +22,9 @@ class DataConfig:
 
     # Audio processing
     sample_rate: int = 16000
-    clip_duration: Optional[float] = None  # Clip duration in seconds (None = variable length)
+    clip_duration: Optional[float] = (
+        None  # Clip duration in seconds (None = variable length)
+    )
 
     # Data splits
     train_split: float = 0.8

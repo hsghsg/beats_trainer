@@ -6,6 +6,6 @@ from .feature_extractor import BEATsFeatureExtractor
 
 __all__ = [
     "BEATsLightningModule",
-    "Config", 
+    "Config",
     "BEATsFeatureExtractor",
 ]

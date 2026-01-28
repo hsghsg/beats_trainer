@@ -14,23 +14,25 @@ import pytorch_lightning as pl
 from ..core.config import DataConfig
 
 
-def collate_audio_batch(batch: List[Tuple[torch.Tensor, torch.Tensor, int]]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+def collate_audio_batch(
+    batch: List[Tuple[torch.Tensor, torch.Tensor, int]],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Custom collate function for audio data with optional fixed duration.
-    
+
     Args:
         batch: List of (audio_tensor, padding_mask, label) tuples
-        
+
     Returns:
         Tuple of (padded_audio, padding_mask, labels) tensors
     """
     # Separate the components
     audio_tensors, padding_masks, labels = zip(*batch)
-    
+
     # Check if all audio tensors have the same length (fixed duration mode)
     lengths = [audio.shape[0] for audio in audio_tensors]
     all_same_length = len(set(lengths)) == 1
-    
+
     if all_same_length:
         # Fixed duration mode - all clips are already the same length
         audio_batch = torch.stack(audio_tensors)
@@ -39,36 +41,40 @@ def collate_audio_batch(batch: List[Tuple[torch.Tensor, torch.Tensor, int]]) -> 
     else:
         # Variable duration mode - need to pad to max length
         max_length = max(lengths)
-        
+
         # Pad all audio tensors to the same length
         padded_audio = []
         batch_padding_masks = []
-        
+
         for audio, old_mask in zip(audio_tensors, padding_masks):
             current_length = audio.shape[0]
-            
+
             if current_length < max_length:
                 # Pad with zeros
                 padding_needed = max_length - current_length
                 padded = torch.nn.functional.pad(audio, (0, padding_needed), value=0.0)
-                
+
                 # Update padding mask (True = padded/masked, False = real audio)
-                new_mask = torch.cat([
-                    old_mask,  # Keep existing mask
-                    torch.ones(padding_needed, dtype=torch.bool)  # Add padding mask
-                ])
+                new_mask = torch.cat(
+                    [
+                        old_mask,  # Keep existing mask
+                        torch.ones(
+                            padding_needed, dtype=torch.bool
+                        ),  # Add padding mask
+                    ]
+                )
             else:
                 padded = audio
                 new_mask = old_mask
-                
+
             padded_audio.append(padded)
             batch_padding_masks.append(new_mask)
-        
+
         # Stack into batches
         audio_batch = torch.stack(padded_audio)
         padding_batch = torch.stack(batch_padding_masks)
         label_batch = torch.tensor(labels, dtype=torch.long)
-    
+
     return audio_batch, padding_batch, label_batch
 
 
@@ -115,24 +121,26 @@ class AudioDataset(Dataset):
         # Handle fixed clip duration
         if self.target_length is not None:
             current_length = audio_tensor.shape[0]
-            
+
             if current_length > self.target_length:
                 # Truncate to target length (take from the beginning)
-                audio_tensor = audio_tensor[:self.target_length]
+                audio_tensor = audio_tensor[: self.target_length]
                 padding_mask = torch.zeros(self.target_length, dtype=torch.bool)
-                
+
             elif current_length < self.target_length:
                 # Pad to target length
                 padding_needed = self.target_length - current_length
                 audio_tensor = torch.nn.functional.pad(
                     audio_tensor, (0, padding_needed), value=0.0
                 )
-                
+
                 # Create padding mask (True = padded, False = real audio)
-                padding_mask = torch.cat([
-                    torch.zeros(current_length, dtype=torch.bool),  # Real audio
-                    torch.ones(padding_needed, dtype=torch.bool)    # Padded
-                ])
+                padding_mask = torch.cat(
+                    [
+                        torch.zeros(current_length, dtype=torch.bool),  # Real audio
+                        torch.ones(padding_needed, dtype=torch.bool),  # Padded
+                    ]
+                )
             else:
                 # Exact length, no padding needed
                 padding_mask = torch.zeros(current_length, dtype=torch.bool)
@@ -166,7 +174,7 @@ class BEATsDataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.config = config
         self.pre_split = pre_split
-        
+
         # For pre-split datasets
         self.train_df = train_df
         self.val_df = val_df
@@ -192,26 +200,26 @@ class BEATsDataModule(pl.LightningDataModule):
         """Setup datasets from pre-split dataframes."""
         if self.train_df is not None:
             self.train_dataset = AudioDataset(
-                self.train_df, 
-                self.data_dir, 
+                self.train_df,
+                self.data_dir,
                 self.config.sample_rate,
-                clip_duration=self.config.clip_duration
+                clip_duration=self.config.clip_duration,
             )
 
         if self.val_df is not None and len(self.val_df) > 0:
             self.val_dataset = AudioDataset(
-                self.val_df, 
-                self.data_dir, 
+                self.val_df,
+                self.data_dir,
                 self.config.sample_rate,
-                clip_duration=self.config.clip_duration
+                clip_duration=self.config.clip_duration,
             )
 
         if self.test_df is not None and len(self.test_df) > 0:
             self.test_dataset = AudioDataset(
-                self.test_df, 
-                self.data_dir, 
+                self.test_df,
+                self.data_dir,
                 self.config.sample_rate,
-                clip_duration=self.config.clip_duration
+                clip_duration=self.config.clip_duration,
             )
 
     def _setup_auto_split(self):
@@ -246,26 +254,26 @@ class BEATsDataModule(pl.LightningDataModule):
 
         # Create datasets
         self.train_dataset = AudioDataset(
-            train, 
-            self.data_dir, 
+            train,
+            self.data_dir,
             self.config.sample_rate,
-            clip_duration=self.config.clip_duration
+            clip_duration=self.config.clip_duration,
         )
 
         if len(val) > 0:
             self.val_dataset = AudioDataset(
-                val, 
-                self.data_dir, 
+                val,
+                self.data_dir,
                 self.config.sample_rate,
-                clip_duration=self.config.clip_duration
+                clip_duration=self.config.clip_duration,
             )
 
         if len(test) > 0:
             self.test_dataset = AudioDataset(
-                test, 
-                self.data_dir, 
+                test,
+                self.data_dir,
                 self.config.sample_rate,
-                clip_duration=self.config.clip_duration
+                clip_duration=self.config.clip_duration,
             )
 
     def train_dataloader(self):
@@ -312,7 +320,7 @@ class PreSplitDataModule(pl.LightningDataModule):
         val_data: Optional[pd.DataFrame] = None,
         test_data: Optional[pd.DataFrame] = None,
         train_data_dir: Optional[str] = None,
-        val_data_dir: Optional[str] = None, 
+        val_data_dir: Optional[str] = None,
         test_data_dir: Optional[str] = None,
         batch_size: int = 32,
         num_workers: int = 4,
@@ -352,28 +360,28 @@ class PreSplitDataModule(pl.LightningDataModule):
 
         # Create datasets with their respective data directories
         self.train_dataset = AudioDataset(
-            self.train_data, 
-            train_data_dir, 
+            self.train_data,
+            train_data_dir,
             self.sample_rate,
-            clip_duration=self.clip_duration
+            clip_duration=self.clip_duration,
         )
-        
+
         if self.val_data is not None and len(self.val_data) > 0:
             val_data_dir = self.val_data_dir if self.val_data_dir else train_data_dir
             self.val_dataset = AudioDataset(
-                self.val_data, 
-                val_data_dir, 
+                self.val_data,
+                val_data_dir,
                 self.sample_rate,
-                clip_duration=self.clip_duration
+                clip_duration=self.clip_duration,
             )
-        
+
         if self.test_data is not None and len(self.test_data) > 0:
             test_data_dir = self.test_data_dir if self.test_data_dir else train_data_dir
             self.test_dataset = AudioDataset(
-                self.test_data, 
-                test_data_dir, 
+                self.test_data,
+                test_data_dir,
                 self.sample_rate,
-                clip_duration=self.clip_duration
+                clip_duration=self.clip_duration,
             )
 
         # Store number of classes

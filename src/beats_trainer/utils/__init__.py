@@ -12,7 +12,7 @@ from .checkpoints import (
 __all__ = [
     "ensure_checkpoint",
     "list_available_models",
-    "download_beats_checkpoint", 
+    "download_beats_checkpoint",
     "find_checkpoint",
     "validate_checkpoint",
     "get_model_info",

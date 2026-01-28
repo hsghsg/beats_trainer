@@ -131,7 +131,7 @@ results = predictor.predict_on_file(
 ```python
 # Saves as human-readable text
 results = predictor.predict_on_file(
-    audio_path="recording.wav", 
+    audio_path="recording.wav",
     output_path="detections.txt"
 )
 ```
@@ -183,7 +183,7 @@ print(f"Glass breaking events: {len(glass_breaking)}")
 predictor = create_long_form_predictor(
     trainer=wildlife_trainer,
     chunk_length=5.0,   # Short chunks for brief bird calls
-    overlap=1.0,        # Catch calls at boundaries  
+    overlap=1.0,        # Catch calls at boundaries
     confidence_threshold=0.6
 )
 
@@ -236,7 +236,7 @@ import matplotlib.pyplot as plt
 plt.figure(figsize=(12, 6))
 for _, detection in results.iterrows():
     plt.barh(
-        detection['class_name'], 
+        detection['class_name'],
         detection['end_time'] - detection['start_time'],
         left=detection['start_time'],
         alpha=0.7
@@ -255,7 +255,7 @@ medium_conf = results[results['confidence'].between(0.6, 0.8)]
 low_conf = results[results['confidence'] < 0.6]
 
 print(f"High confidence: {len(high_conf)}")
-print(f"Medium confidence: {len(medium_conf)}")  
+print(f"Medium confidence: {len(medium_conf)}")
 print(f"Low confidence: {len(low_conf)}")
 ```
 
@@ -297,7 +297,7 @@ predictor = create_long_form_predictor(
 ### Disk Space
 
 Output files scale with detection count:
-- CSV: ~100-500 bytes per detection  
+- CSV: ~100-500 bytes per detection
 - Text: ~80-200 bytes per detection
 - Consider compression for large datasets
 
@@ -396,17 +396,17 @@ from pathlib import Path
 def monitor_directory(watch_dir, output_dir):
     """Continuously monitor directory for new audio files."""
     processed = set()
-    
+
     while True:
         for audio_file in Path(watch_dir).glob("*.wav"):
             if audio_file not in processed:
                 print(f"Processing new file: {audio_file}")
                 predictor.predict_on_file(
-                    audio_file, 
+                    audio_file,
                     output_dir / f"{audio_file.stem}_predictions.csv"
                 )
                 processed.add(audio_file)
-        
+
         time.sleep(10)  # Check every 10 seconds
 ```
 

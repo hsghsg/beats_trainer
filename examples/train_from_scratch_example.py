@@ -10,7 +10,8 @@ import os
 # Add the source directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from beats_trainer.config import Config, ModelConfig, DataConfig, TrainingConfig
+from beats_trainer import Config
+from beats_trainer.core.config import DataConfig, ModelConfig, TrainingConfig
 
 
 def create_scratch_training_config():
@@ -95,8 +96,7 @@ def main():
     print("""
 To use this configuration for training:
 
-from beats_trainer import BEATsTrainer
-from beats_trainer.config import Config
+from beats_trainer import BEATsTrainer, Config
 
 # Load the configuration
 config = Config.from_yaml("config_train_from_scratch.yaml")

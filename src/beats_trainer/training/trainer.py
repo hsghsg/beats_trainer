@@ -1,6 +1,5 @@
 """Simplified BEATs Trainer class - focused on core training functionality."""
 
-import os
 from pathlib import Path
 from typing import Optional, Union, Dict, Any
 
@@ -100,7 +99,7 @@ class BEATsTrainer:
 
         # Validate dataset (skip if using provided data module)
         if self._provided_data_module is None:
-            dataset_stats = validate_dataset(self.dataset, self.data_dir)
+            validate_dataset(self.dataset, self.data_dir)
 
         # Setup data module
         if self._provided_data_module is not None:
@@ -178,8 +177,10 @@ class BEATsTrainer:
             self.model, datamodule=self.data_module, ckpt_path=ckpt_path
         )
 
-        formatted_results = format_training_results(test_results[0] if test_results else {})
-        print(f"✅ Testing completed")
+        formatted_results = format_training_results(
+            test_results[0] if test_results else {}
+        )
+        print("✅ Testing completed")
         return formatted_results
 
     def predict(

@@ -82,11 +82,13 @@ class BEATsFeatureExtractor:
         self.model_path = Path(model_path)
         self.layer = layer
         self.pooling = pooling.lower()
-        
+
         # Validate pooling method
         valid_pooling = {"mean", "max", "first", "last", "cls", "none"}
         if self.pooling not in valid_pooling:
-            raise ValueError(f"Unknown pooling method: {self.pooling}. Valid options: {valid_pooling}")
+            raise ValueError(
+                f"Unknown pooling method: {self.pooling}. Valid options: {valid_pooling}"
+            )
 
         if device is None or device == "auto":
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -107,18 +109,20 @@ class BEATsFeatureExtractor:
 
         # Detect checkpoint type (PyTorch Lightning vs pretrained BEATs)
         is_lightning_checkpoint = "state_dict" in checkpoint
-        
+
         if is_lightning_checkpoint:
             # Lightning checkpoint from BEATsTrainer
             print("Detected PyTorch Lightning checkpoint")
-            
+
             # Extract config from hyperparameters
             hparams = checkpoint.get("hyper_parameters", {})
             config_obj = hparams.get("config")
-            
+
             if config_obj is None:
-                raise ValueError("Could not find config in Lightning checkpoint hyperparameters")
-            
+                raise ValueError(
+                    "Could not find config in Lightning checkpoint hyperparameters"
+                )
+
             # Build config dict from Config object
             checkpoint_cfg = {
                 "encoder_layers": config_obj.model.encoder_layers,
@@ -145,24 +149,28 @@ class BEATsFeatureExtractor:
                 "embed_dim": 512,
                 "finetuned_model": False,  # Remove classifier head for feature extraction
             }
-            
+
             # Create config
             cfg = BEATsConfig(checkpoint_cfg)
-            
+
             # Initialize model
             self.model = BEATs(cfg)
-            
+
             # Load state dict (Lightning stores model state under 'state_dict' key)
             # Extract only backbone weights (exclude classifier head)
             state_dict = checkpoint["state_dict"]
-            backbone_state = {k.replace("backbone.", ""): v for k, v in state_dict.items() if k.startswith("backbone.")}
-            
+            backbone_state = {
+                k.replace("backbone.", ""): v
+                for k, v in state_dict.items()
+                if k.startswith("backbone.")
+            }
+
             self.model.load_state_dict(backbone_state, strict=False)
-            
+
         else:
             # Pretrained BEATs checkpoint
             print("Detected pretrained BEATs checkpoint")
-            
+
             # Handle incomplete checkpoint configurations (like OpenBEATs)
             checkpoint_cfg = checkpoint["cfg"]
 

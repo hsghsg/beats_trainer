@@ -14,10 +14,10 @@ from ..core.config import Config
 def setup_training_callbacks(config: Config) -> List:
     """
     Setup PyTorch Lightning callbacks for training.
-    
+
     Args:
         config: Training configuration
-        
+
     Returns:
         List of PyTorch Lightning callbacks
     """
@@ -52,12 +52,12 @@ def setup_training_callbacks(config: Config) -> List:
 def setup_pytorch_lightning_trainer(config: Config, callbacks: List, log_dir) -> object:
     """
     Setup PyTorch Lightning trainer with proper configuration.
-    
+
     Args:
         config: Training configuration
         callbacks: List of callbacks
         log_dir: Directory for logging
-        
+
     Returns:
         Configured PyTorch Lightning trainer
     """

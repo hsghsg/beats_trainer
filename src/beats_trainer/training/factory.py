@@ -5,7 +5,12 @@ from typing import Optional, Union
 import pandas as pd
 
 from ..core.config import Config
-from ..data.datasets import load_dataset, load_esc50, load_split_csvs, scan_directory_dataset
+from ..data.datasets import (
+    load_dataset,
+    load_esc50,
+    load_split_csvs,
+    scan_directory_dataset,
+)
 from ..data.module import PreSplitDataModule
 
 
@@ -14,15 +19,15 @@ class BEATsTrainerFactory:
 
     @classmethod
     def from_directory(
-        cls, 
+        cls,
         trainer_class,
-        data_dir: Union[str, Path], 
-        config: Optional[Config] = None, 
-        **kwargs
+        data_dir: Union[str, Path],
+        config: Optional[Config] = None,
+        **kwargs,
     ):
         """
         Create trainer from directory structure.
-        
+
         Expected structure:
             data_dir/
             ├── class1/
@@ -33,7 +38,9 @@ class BEATsTrainerFactory:
                 └── audio4.wav
         """
         dataset = load_dataset(data_dir, dataset_type="directory")
-        return trainer_class(dataset=dataset, data_dir=data_dir, config=config, **kwargs)
+        return trainer_class(
+            dataset=dataset, data_dir=data_dir, config=config, **kwargs
+        )
 
     @classmethod
     def from_csv(
@@ -67,7 +74,9 @@ class BEATsTrainerFactory:
             audio_column=audio_column,
             label_column=label_column,
         )
-        return trainer_class(dataset=dataset, data_dir=data_dir, config=config, **kwargs)
+        return trainer_class(
+            dataset=dataset, data_dir=data_dir, config=config, **kwargs
+        )
 
     @classmethod
     def from_esc50(
@@ -90,10 +99,10 @@ class BEATsTrainerFactory:
         """
         # Load ESC-50 dataset (auto-download if needed)
         dataset = load_esc50(data_dir, auto_download=True)
-        
+
         # Use organized directory
         organized_dir = Path(data_dir) / "ESC50_organized"
-        
+
         return trainer_class(
             dataset=dataset, data_dir=organized_dir, config=config, **kwargs
         )
@@ -203,14 +212,14 @@ class BEATsTrainerFactory:
         """Helper method to create trainer with a pre-configured data module."""
         # Create a dummy dataset for compatibility (data module will be used instead)
         dummy_dataset = pd.DataFrame({"filename": [], "category": []})
-        
+
         # Create trainer instance with provided data module
         trainer = trainer_class(
             dataset=dummy_dataset,
             data_dir="",  # Not used with pre-split data
             config=config,
             data_module=data_module,  # Pass the pre-configured data module
-            **kwargs
+            **kwargs,
         )
-        
+
         return trainer

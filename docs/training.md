@@ -17,8 +17,7 @@ results = trainer.train()
 ### ESC-50 Example (Auto-Download & Train)
 
 ```python
-from beats_trainer import BEATsTrainer
-from beats_trainer.core.config import Config
+from beats_trainer import BEATsTrainer, Config
 
 config = Config()
 config.model.freeze_backbone = False  # Fine-tune entire model
@@ -101,7 +100,7 @@ trainer.train()
 ```python
 trainer = BEATsTrainer.from_split_csvs(
     train_csv="train.csv",
-    val_csv="val.csv", 
+    val_csv="val.csv",
     test_csv="test.csv",
     audio_column="filename",
     label_column="category"
@@ -116,14 +115,11 @@ BEATs trainer supports both variable-length audio (automatic padding) and fixed-
 ### Variable Length (Default)
 
 ```python
-from beats_trainer.core.config import Config, DataConfig
+from beats_trainer import Config
 
-config = Config(
-    data=DataConfig(
-        clip_duration=None,  # Default: variable length
-        batch_size=16
-    )
-)
+config = Config()
+config.data.clip_duration = None  # Default: variable length
+config.data.batch_size = 16
 
 trainer = BEATsTrainer.from_directory("dataset", config=config)
 # Each batch will be padded to the longest clip in that batch
@@ -140,13 +136,10 @@ trainer = BEATsTrainer.from_directory("dataset", config=config)
 Force all audio clips to be exactly the same length:
 
 ```python
-config = Config(
-    data=DataConfig(
-        clip_duration=1.0,   # All clips will be exactly 1 second
-        sample_rate=16000,   # = 16,000 samples per clip
-        batch_size=32        # Can use larger batches with consistent size
-    )
-)
+config = Config()
+config.data.clip_duration = 1.0    # All clips will be exactly 1 second
+config.data.sample_rate = 16000    # = 16,000 samples per clip
+config.data.batch_size = 32        # Can use larger batches with consistent size
 
 trainer = BEATsTrainer.from_directory("dataset", config=config)
 ```
@@ -159,17 +152,27 @@ trainer = BEATsTrainer.from_directory("dataset", config=config)
 ### Common Duration Configurations
 
 ```python
+from beats_trainer import Config
+
 # Quick prototyping - very short clips
-config = Config(data=DataConfig(clip_duration=0.5, batch_size=64))
+config = Config()
+config.data.clip_duration = 0.5
+config.data.batch_size = 64
 
 # Standard short clips
-config = Config(data=DataConfig(clip_duration=1.0, batch_size=32))
+config = Config()
+config.data.clip_duration = 1.0
+config.data.batch_size = 32
 
-# Medium clips for detailed analysis  
-config = Config(data=DataConfig(clip_duration=3.0, batch_size=16))
+# Medium clips for detailed analysis
+config = Config()
+config.data.clip_duration = 3.0
+config.data.batch_size = 16
 
 # Long clips for complex audio
-config = Config(data=DataConfig(clip_duration=10.0, batch_size=8))
+config = Config()
+config.data.clip_duration = 10.0
+config.data.batch_size = 8
 ```
 
 ### Memory and Performance
@@ -207,26 +210,25 @@ config = Config(data=DataConfig(clip_duration=10.0, batch_size=8))
 Different sample rates affect the number of samples per clip:
 
 ```python
-# High quality, short duration
-config = Config(data=DataConfig(
-    sample_rate=22050,    # High quality
-    clip_duration=1.0,    # = 22,050 samples
-    batch_size=16
-))
+from beats_trainer import Config
 
-# Standard quality, longer duration  
-config = Config(data=DataConfig(
-    sample_rate=16000,    # Standard
-    clip_duration=2.0,    # = 32,000 samples  
-    batch_size=16
-))
+# High quality, short duration
+config = Config()
+config.data.sample_rate = 22050    # High quality
+config.data.clip_duration = 1.0    # = 22,050 samples
+config.data.batch_size = 16
+
+# Standard quality, longer duration
+config = Config()
+config.data.sample_rate = 16000    # Standard
+config.data.clip_duration = 2.0    # = 32,000 samples
+config.data.batch_size = 16
 
 # Lower quality, very long duration
-config = Config(data=DataConfig(
-    sample_rate=8000,     # Lower quality
-    clip_duration=4.0,    # = 32,000 samples
-    batch_size=16
-))
+config = Config()
+config.data.sample_rate = 8000     # Lower quality
+config.data.clip_duration = 4.0    # = 32,000 samples
+config.data.batch_size = 16
 ```
 
 All three configurations above use the same memory per clip (~128KB) but provide different quality/duration trade-offs.
@@ -236,7 +238,7 @@ All three configurations above use the same memory per clip (~128KB) but provide
 ### Classification Head Only (Fast)
 
 ```python
-from beats_trainer.core.config import Config
+from beats_trainer import Config
 
 config = Config()
 config.model.freeze_backbone = True  # Only train classifier
@@ -261,23 +263,22 @@ results = trainer.train()
 ### Training From Scratch
 
 ```python
-from beats_trainer.core.config import Config, ModelConfig, TrainingConfig
+from beats_trainer import Config
 
-config = Config(
-    model=ModelConfig(
-        train_from_scratch=True,    # Key parameter!
-        encoder_layers=12,          # Transformer layers
-        encoder_embed_dim=768,      # Hidden dimension
-        encoder_attention_heads=12, # Attention heads
-        fine_tune_backbone=True,
-        freeze_backbone=False
-    ),
-    training=TrainingConfig(
-        learning_rate=1e-3,         # Higher LR for scratch training
-        max_epochs=100,             # More epochs needed
-        patience=15                 # More patience
-    )
-)
+config = Config()
+
+# Model settings for training from scratch
+config.model.train_from_scratch = True    # Key parameter!
+config.model.encoder_layers = 12          # Transformer layers
+config.model.encoder_embed_dim = 768      # Hidden dimension
+config.model.encoder_attention_heads = 12 # Attention heads
+config.model.fine_tune_backbone = True
+config.model.freeze_backbone = False
+
+# Training settings for scratch training
+config.training.learning_rate = 1e-3      # Higher LR for scratch training
+config.training.max_epochs = 100          # More epochs needed
+config.training.patience = 15             # More patience
 
 trainer = BEATsTrainer.from_directory("dataset", config=config)
 results = trainer.train()
@@ -290,91 +291,54 @@ results = trainer.train()
 Here's how to configure every aspect of training with a full config:
 
 ```python
-from beats_trainer.core.config import Config, DataConfig, ModelConfig, TrainingConfig
+from beats_trainer import Config
 
 # Complete configuration with all parameters
 config = Config(
     # Experiment settings
     experiment_name="my_audio_classifier",
-    seed=42,
-    
-    # Data configuration
-    data=DataConfig(
-        # Basic data settings
-        batch_size=32,
-        num_workers=4,
-        sample_rate=16000,
-        audio_max_length=10.0,    # Maximum audio length in seconds
-        
-        # Data splits (only used with from_directory or from_csv)
-        train_split=0.7,          # 70% for training
-        val_split=0.2,            # 20% for validation  
-        test_split=0.1,           # 10% for testing
-        
-        # Data loading
-        shuffle=True,
-        drop_last=False,
-        pin_memory=True           # Speed up GPU training
-    ),
-    
-    # Model configuration
-    model=ModelConfig(
-        # Model selection
-        model_name="BEATs_iter3_plus_AS2M",  # or "openbeats"
-        model_path=None,          # Use None for auto-download
-        
-        # Architecture settings
-        num_classes=10,           # Set automatically from data
-        dropout=0.1,
-        
-        # Training strategy
-        freeze_backbone=False,     # True = freeze BEATs, False = fine-tune
-        fine_tune_backbone=True,   # Enable backbone training
-        train_from_scratch=False,  # True = no pre-trained weights
-        
-        # For training from scratch only
-        encoder_layers=12,
-        encoder_embed_dim=768,
-        encoder_attention_heads=12,
-        input_patch_size=16
-    ),
-    
-    # Training configuration  
-    training=TrainingConfig(
-        # Optimization
-        learning_rate=5e-5,       # Lower for fine-tuning, higher for scratch
-        optimizer="adamw",        # "adamw", "adam", or "sgd"
-        weight_decay=1e-4,
-        
-        # Learning rate scheduling
-        scheduler="cosine",       # "cosine", "step", or "plateau"
-        scheduler_step_size=10,   # For step scheduler
-        scheduler_gamma=0.1,      # For step scheduler
-        
-        # Training duration
-        max_epochs=50,
-        min_epochs=5,
-        
-        # Early stopping
-        patience=10,              # Stop if no improvement for N epochs
-        early_stopping_monitor="val_accuracy",
-        early_stopping_mode="max", # "max" for accuracy, "min" for loss
-        
-        # Validation
-        val_check_interval=1.0,   # Check validation every epoch
-        
-        # Hardware settings
-        gpus=1,                   # Number of GPUs (0 for CPU)
-        precision=32,             # 16 for mixed precision, 32 for full
-        
-        # Reproducibility
-        deterministic=False,      # True for reproducible results (slower)
-        
-        # Logging
-        log_every_n_steps=50,
-        save_top_k=3              # Keep top 3 checkpoints
-    )
+    seed=42
 )
+
+# Configure data settings
+config.data.batch_size = 32
+config.data.num_workers = 4
+config.data.sample_rate = 16000
+config.data.clip_duration = None        # None = variable length, or set to seconds (e.g., 1.0)
+
+# Data splits (only used with from_directory or from_csv)
+config.data.train_split = 0.7           # 70% for training
+config.data.val_split = 0.2             # 20% for validation
+config.data.test_split = 0.1            # 10% for testing
+
+# Model configuration
+config.model.model_path = None           # Use None for auto-download
+config.model.num_classes = None          # Set automatically from data
+config.model.dropout_rate = 0.1          # Dropout rate for classifier
+
+# Training strategy
+config.model.freeze_backbone = False     # True = freeze BEATs, False = fine-tune
+config.model.fine_tune_backbone = True   # Enable backbone training
+config.model.train_from_scratch = False  # True = no pre-trained weights
+
+# For training from scratch only
+config.model.encoder_layers = 12
+config.model.encoder_embed_dim = 768
+config.model.encoder_attention_heads = 12
+config.model.input_patch_size = 16
+
+# Training configuration
+config.training.learning_rate = 5e-5     # Lower for fine-tuning, higher for scratch
+config.training.optimizer = "adamw"      # "adamw", "adam", or "sgd"
+config.training.weight_decay = 1e-4
+config.training.scheduler = "cosine"     # "cosine", "step", or "plateau"
+config.training.max_epochs = 50
+config.training.patience = 10            # Early stopping patience
+
+# Hardware settings
+config.training.gpus = 1                 # Number of GPUs (0 for CPU)
+config.training.precision = 32           # 16 for mixed precision, 32 for full
+config.training.deterministic = False    # True for reproducible results (slower)
 
 # Use the complete configuration
 trainer = BEATsTrainer.from_directory("dataset", config=config)
@@ -386,65 +350,59 @@ results = trainer.train()
 #### Small Dataset (< 1000 samples)
 
 ```python
-config = Config(
-    data=DataConfig(
-        batch_size=16,            # Smaller batches
-        train_split=0.8,          # More training data
-        val_split=0.2,
-        test_split=0.0            # No test split for small data
-    ),
-    model=ModelConfig(
-        freeze_backbone=True,     # Only train classifier head
-        dropout=0.3               # More dropout to prevent overfitting
-    ),
-    training=TrainingConfig(
-        learning_rate=1e-4,       # Higher learning rate
-        max_epochs=100,           # More epochs
-        patience=20,              # More patience
-        weight_decay=1e-3         # More regularization
-    )
-)
+config = Config()
+
+config.data.batch_size = 16            # Smaller batches
+config.data.train_split = 0.8          # More training data
+config.data.val_split = 0.2
+config.data.test_split = 0.0           # No test split for small data
+
+config.model.freeze_backbone = True    # Only train classifier head
+config.model.dropout_rate = 0.3        # More dropout to prevent overfitting
+
+config.training.learning_rate = 1e-4   # Higher learning rate
+config.training.max_epochs = 100       # More epochs
+config.training.patience = 20          # More patience
+config.training.weight_decay = 1e-3    # More regularization
 ```
 
 #### Large Dataset (> 10,000 samples)
 
 ```python
-config = Config(
-    data=DataConfig(
-        batch_size=64,            # Larger batches
-        num_workers=8,            # More data loading workers
-        pin_memory=True
-    ),
-    model=ModelConfig(
-        freeze_backbone=False,    # Fine-tune entire model
-        dropout=0.1               # Less dropout needed
-    ),
-    training=TrainingConfig(
-        learning_rate=1e-5,       # Lower learning rate
-        max_epochs=30,            # Fewer epochs needed
-        patience=5,               # Less patience needed
-        weight_decay=1e-5,        # Less regularization
-        precision=16              # Mixed precision for speed
-    )
-)
+config = Config()
+
+config.data.batch_size = 64            # Larger batches
+config.data.num_workers = 8            # More data loading workers
+
+config.model.freeze_backbone = False   # Fine-tune entire model
+config.model.dropout_rate = 0.1        # Less dropout needed
+
+config.training.learning_rate = 1e-5   # Lower learning rate
+config.training.max_epochs = 30        # Fewer epochs needed
+config.training.patience = 5           # Less patience needed
+config.training.weight_decay = 1e-5    # Less regularization
+config.training.precision = 16         # Mixed precision for speed
 ```
 
 #### GPU Optimization
 
 ```python
-config = Config(
-    data=DataConfig(
-        batch_size=64,            # Larger batch for GPU
-        num_workers=8,            # Match CPU cores
-        pin_memory=True,          # Faster GPU transfer
+config = Config()
+
+config.data.batch_size = 64            # Larger batch for GPU
+config.data.num_workers = 8            # Match CPU cores
+
+config.training.precision = 16         # Mixed precision training
+config.training.gpus = 1               # Use GPU
+config.training.deterministic = False  # Faster training
         drop_last=True            # Consistent batch sizes
     ),
     training=TrainingConfig(
         precision=16,             # Mixed precision training
         gpus=1,                   # Use GPU
-        deterministic=False       # Faster training
-    )
-)
+config.training.precision = 16         # Mixed precision training
+config.training.gpus = 1               # Use GPU
+config.training.deterministic = False  # Faster training
 ```
 
 ### YAML Configuration
@@ -459,20 +417,22 @@ seed: 42
 data:
   batch_size: 32
   sample_rate: 16000
-  audio_max_length: 10.0
+  clip_duration: 1.0
   train_split: 0.7
   val_split: 0.2
   test_split: 0.1
 
 model:
-  model_name: "BEATs_iter3_plus_AS2M"
+  model_path: null
   freeze_backbone: false
-  dropout: 0.1
+  dropout_rate: 0.1
 
 training:
   learning_rate: 5e-5
   optimizer: "adamw"
   max_epochs: 50
+  patience: 10
+  scheduler: "cosine"
   patience: 10
   scheduler: "cosine"
 ```
@@ -488,7 +448,6 @@ results = trainer.train()
 ### Quick Parameter Changes
 
 ```python
-### Quick Parameter Changes
 # Start with default config and modify specific parameters
 config = Config()
 

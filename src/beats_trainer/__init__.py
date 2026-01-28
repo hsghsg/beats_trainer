@@ -53,4 +53,6 @@ __all__ = [
 
 # Add training components if available
 if _TRAINING_AVAILABLE:
-    __all__.extend(["BEATsTrainer", "Config", "LongFormPredictor", "create_long_form_predictor"])
+    __all__.extend(
+        ["BEATsTrainer", "Config", "LongFormPredictor", "create_long_form_predictor"]
+    )

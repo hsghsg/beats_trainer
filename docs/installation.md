@@ -95,7 +95,7 @@ print(f"✅ Default model downloaded to: {checkpoint_path}")
 - Check you're using the correct Python environment
 
 **CUDA out of memory**
-- Reduce batch size in config: `config.data.batch_size = 16` 
+- Reduce batch size in config: `config.data.batch_size = 16`
 - Use CPU instead: Set `CUDA_VISIBLE_DEVICES=""`
 
 **Audio loading errors**

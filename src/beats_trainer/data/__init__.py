@@ -13,7 +13,7 @@ from .module import BEATsDataModule, PreSplitDataModule
 
 __all__ = [
     "scan_directory_dataset",
-    "load_csv_dataset", 
+    "load_csv_dataset",
     "load_dataset",
     "validate_dataset",
     "load_esc50",

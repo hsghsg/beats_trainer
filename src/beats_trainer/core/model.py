@@ -122,11 +122,13 @@ class BEATsLightningModule(pl.LightningModule):
         if not os.path.exists(model_path):
             # Check if it's a known model name or if we can infer the model name
             from ..utils.checkpoints import BEATS_MODELS, ensure_checkpoint
-            
+
             # Extract model name from path - handle cases like "checkpoints/BEATs_iter3_plus_AS2M.pt"
             model_name = None
-            path_stem = os.path.splitext(os.path.basename(model_path))[0]  # Remove extension
-            
+            path_stem = os.path.splitext(os.path.basename(model_path))[
+                0
+            ]  # Remove extension
+
             # Direct match
             if path_stem in BEATS_MODELS:
                 model_name = path_stem
@@ -138,14 +140,16 @@ class BEATsLightningModule(pl.LightningModule):
                 model_name = "BEATs_iter3_plus_AS2M"
             elif "openbeats" in model_path.lower():
                 model_name = "openbeats"
-                
+
             if model_name:
                 print(f"📥 Loading pre-trained BEATs model: {model_name}")
                 model_path = ensure_checkpoint(
                     model_name, search_first=True
                 )  # Search first, then download if needed
             else:
-                raise FileNotFoundError(f"BEATs model not found at: {model_path}. Available models: {list(BEATS_MODELS.keys())}")
+                raise FileNotFoundError(
+                    f"BEATs model not found at: {model_path}. Available models: {list(BEATS_MODELS.keys())}"
+                )
 
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
 
