@@ -17,11 +17,6 @@ classifiers = [
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Multimedia :: Sound/Audio :: Analysis"
 ]
@@ -29,21 +24,16 @@ dependencies = [
   "pytorch-lightning>=1.9.0",
   "torchmetrics>=0.11.0",
   "librosa>=0.9.0",
-  "soundfile>=0.10.0",
   "pandas>=1.3.0",
   "numpy>=1.19.0",
   "scikit-learn>=1.0.0",
   "pyyaml>=6.0",
-  "seaborn>=0.13.2",
   "tensorboard>=2.14.0",
-  "umap-learn>=0.5.0",
-  "requests>=2.25.0",
   "huggingface-hub>=0.17.0",
-  "dvc[webdav]>=3.0.0",
   "torch>=2.5.1",
   "torchaudio>=2.5.1",
-  "torchvision>=0.20.1",
-  "tqdm>=4.60.0"
+  "tqdm>=4.60.0",
+  "einops>=0.6.0"
 ]
 description = "A streamlined library for training and using BEATs (Bidirectional Encoder representation from Audio Transformers) models on audio classification tasks"
 keywords = ["audio", "classification", "transformer", "BEATs", "machine-learning", "pytorch"]
@@ -53,18 +43,17 @@ maintainers = [
 ]
 name = "beats-trainer"
 readme = "README.md"
-requires-python = ">=3.8"
-version = "0.2.0"
+requires-python = ">=3.12"
+version = "0.2.1"
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3.5",
   "pytest-cov>=4.0.0",
-  "black>=22.0.0",
-  "isort>=5.0.0",
-  "flake8>=4.0.0",
-  "dvc>=3.0.0",
-  "dvc[webdav]>=3.0.0"
+  "dvc[webdav]>=3.0.0",
+  "soundfile>=0.12.0",
+  "psutil>=5.9.0",
+  "scipy>=1.8.0"
 ]
 notebooks = [
   "jupyter>=1.0.0",
@@ -75,14 +64,20 @@ notebooks = [
   "plotly>=5.0.0"
 ]
 
-[project.scripts]
-beats-train = "beats_trainer.cli:main"
-
 [project.urls]
 Documentation = "https://github.com/NINAnor/beats_trainer/tree/main/notebooks"
 Homepage = "https://github.com/NINAnor/beats_trainer"
 Issues = "https://github.com/NINAnor/beats_trainer/issues"
 Repository = "https://github.com/NINAnor/beats_trainer"
+
+[tool.deptry]
+extend_exclude = ["test", "scripts", "notebooks", "examples", "example_scripts"]
+known_first_party = ["beats_trainer", "BEATs"]
+package_module_name_map = {"scikit-learn" = "sklearn", "pyyaml" = "yaml"}
+pep621_dev_dependency_groups = ["dev", "notebooks"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["tensorboard"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/beats_trainer", "src/BEATs"]
@@ -91,3 +86,7 @@ packages = ["src/beats_trainer", "src/BEATs"]
 markers = [
   "slow: marks tests as slow (deselect with '-m \"not slow\"')"
 ]
+
+[tool.ruff]
+exclude = ["notebooks"]
+fix = true
