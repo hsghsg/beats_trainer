@@ -46,7 +46,7 @@ pip install jupyter matplotlib seaborn plotly
 
 ## System Requirements
 
-- **Python**: 3.8 or higher
+- **Python**: 3.12 or higher
 - **PyTorch**: 2.5.1+ (automatically installed)
 - **CUDA**: Optional but recommended for GPU acceleration
 - **Memory**: Minimum 8GB RAM, 16GB+ recommended for large datasets
@@ -131,6 +131,6 @@ pytest
 pytest --cov=beats_trainer
 
 # Format code
-black src/ test/
-isort src/ test/
+uv run ruff check .
+uv run ruff format .
 ```
