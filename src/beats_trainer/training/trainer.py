@@ -174,7 +174,7 @@ class BEATsTrainer:
 
         # Test the model
         test_results = self.trainer.test(
-            self.model, datamodule=self.data_module, ckpt_path=ckpt_path
+            self.model, datamodule=self.data_module, ckpt_path=ckpt_path, weights_only=False,
         )
 
         formatted_results = format_training_results(
