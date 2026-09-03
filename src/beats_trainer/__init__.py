@@ -6,6 +6,12 @@ __email__ = "benjamin.cretois@nina.no"
 
 # Core feature extraction (always available)
 from .core.feature_extractor import BEATsFeatureExtractor
+from .classifiers import (
+    BaseEmbeddingClassifier,
+    GMMCosineKNNHybridClassifier,
+    LocalDensityKNNClassifier,
+    RelativeMahalanobisDistanceClassifier,
+)
 from .utils.checkpoints import (
     ensure_checkpoint,
     list_available_models,
@@ -42,6 +48,11 @@ __all__ = [
     "__version__",
     # Core feature extraction (always available)
     "BEATsFeatureExtractor",
+    # Embedding classifiers
+    "BaseEmbeddingClassifier",
+    "GMMCosineKNNHybridClassifier",
+    "LocalDensityKNNClassifier",
+    "RelativeMahalanobisDistanceClassifier",
     # Checkpoint management utilities
     "ensure_checkpoint",
     "list_available_models",
