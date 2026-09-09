@@ -1,0 +1,62 @@
+# 启动：python scripts/train_beats.py；检查配置：追加 --dry-run；临时切换模式：追加 --mode finetune
+
+mode:                   head        # head：分类头训练；finetune：全量微调；scratch：从零训练
+experiment_name:        mimii_pump  # 实验名，自动追加模式后缀
+log_dir:                ../logs     # 日志与检查点目录；相对路径均以本 YAML 所在目录为基准
+test_after_training:    true        # 训练后使用最佳可用检查点评估测试集
+resume_from_checkpoint: null        # 恢复训练用的 .ckpt；null 为新训练；恢复时保持模式、结构及数据一致
+
+data:  # 各划分目录下按类别存放音频，例如 train/normal/*.wav
+  train_dir:   ../data_ready/train  # 训练集
+  val_dir:     ../data_ready/val    # 验证集
+  test_dir:    ../data_ready/test   # 测试集；关闭训练后测试时可设为 null
+  sample_rate: 16000                # 输入采样率，单位 Hz
+  batch_size:  16                   # 公共批量大小，可由各模式覆盖
+  num_workers: 4                    # 数据加载进程数；排查多进程问题时设为 0
+
+model:  # 冻结和初始化策略由 mode 控制，类别数从数据推断
+  model_path:      ../checkpoints/BEATs_iter3_plus_AS2M.pt  # 原始预训练 .pt；scratch 忽略；null 使用默认模型，缺失时尝试查找或下载
+  dropout_rate:    0.1                                      # 自定义分类头 Dropout；从零训练时也用于主干
+  use_custom_head: false                                    # false：单层线性分类头；true：多层分类头
+  hidden_dims:     [256]                                    # 多层分类头隐藏维度，仅启用自定义分类头时生效
+  activation:      relu                                     # 多层分类头激活函数：relu / gelu
+
+training:  # 学习率、轮数和早停耐心值在 modes 中配置
+  gpus:              1             # 0：CPU；正整数：GPU 数量，需要 CUDA
+  precision:         32            # 全精度：32；GPU 混合精度：16-mixed / bf16-mixed
+  optimizer:         adamw         # 优化器：adamw / adam / sgd
+  weight_decay:      0.01          # 权重衰减系数
+  scheduler:         cosine        # 学习率调度：cosine / step / none（关闭）
+  monitor_metric:    val_accuracy  # 早停与检查点指标：val_accuracy / val_loss
+  log_every_n_steps: 50            # 训练日志记录间隔，单位：批次
+  save_top_k:        3             # 最佳检查点保留数；-1：全部；0：仅保留最后检查点
+
+modes:  # 所选模式覆盖公共参数；以下为起点参数，可按数据和显存调整
+  head:  # 预训练权重，只更新分类头
+    training:
+      learning_rate: 1.0e-4  # 学习率，沿用原 train_mimii.py
+      max_epochs:    30      # 最大训练轮数
+      patience:      8       # 验证指标连续未改善的检查次数
+
+  finetune:  # 预训练权重，更新主干和分类头
+    data:
+      batch_size: 4  # 全量微调保存主干梯度，先使用较小批量
+    training:
+      learning_rate: 5.0e-5  # 微调学习率
+      max_epochs:    50      # 最大训练轮数
+      patience:      10      # 早停耐心值
+
+  scratch:  # 随机初始化；若指定恢复检查点，则继续此前的从零训练
+    data:
+      batch_size: 4  # 批量大小
+    model:  # 仅从零训练使用；预训练模式的结构由权重文件决定
+      encoder_layers:          12    # Transformer 编码器层数
+      encoder_embed_dim:       768   # 编码器维度，须能被注意力头数和 16 整除
+      encoder_ffn_embed_dim:   3072  # 前馈网络隐藏维度
+      encoder_attention_heads: 12    # 注意力头数
+      input_patch_size:        16    # 频谱切块尺寸
+      embed_dim:               512   # 输入切块嵌入维度
+    training:
+      learning_rate: 1.0e-3  # 随机初始化模型的学习率
+      max_epochs:    100     # 最大训练轮数
+      patience:      15      # 早停耐心值
