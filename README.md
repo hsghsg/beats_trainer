@@ -17,6 +17,7 @@
 - **[Installation & Setup](docs/installation.md)** - Complete installation guide
 - **[Feature Extraction](docs/feature_extraction.md)** - Extract audio embeddings
 - **[Training Guide](docs/training.md)** - Train models on custom datasets
+- **[分类器后端评估](docs/evaluate_classifier_backends.md)** - 对比四种分类头，查看指标、ROC 曲线和特征缓存说明
 - **[Long-Form Prediction](docs/prediction.md)** - Process long audio files with timestamps
 - **[Example Notebooks](notebooks/README.md)** - Interactive tutorials
 - **[Example Scripts](example_scripts/)** - Ready-to-run code examples
