@@ -2,6 +2,53 @@
 
 Complete guide for training and fine-tuning BEATs models on custom datasets.
 
+## YAML 驱动的 MIMII 三模式训练
+
+在项目根目录运行：
+
+```bash
+python scripts/train_beats.py
+```
+
+默认读取 `scripts/train_beats.yaml`。通常只需修改 YAML 中的 `mode`，
+无需修改 Python 脚本：
+
+| mode | 权重初始化 | 更新范围 | 默认学习率 / 最大轮数 / 批量 |
+| --- | --- | --- | --- |
+| `head` | 加载预训练权重 | 仅分类头 | 1.0e-4 / 30 / 16 |
+| `finetune` | 加载预训练权重 | BEATs 主干及分类头 | 5.0e-5 / 50 / 4 |
+| `scratch` | 随机初始化 | BEATs 主干及分类头 | 1.0e-3 / 100 / 4 |
+
+YAML 中公共的 `data`、`model`、`training` 参数会被所选 `modes` 分支中的
+同名参数覆盖；学习率建议保持 `1.0e-4` 这样的 YAML 数值写法。
+模式自动控制冻结和随机初始化开关，类别数由数据推断。
+实验名称会追加模式后缀，便于分别查看日志和检查点。
+
+也可以临时覆盖训练模式或指定其他配置文件：
+
+```bash
+python scripts/train_beats.py --mode head
+python scripts/train_beats.py --mode finetune
+python scripts/train_beats.py --mode scratch
+python scripts/train_beats.py --config scripts/train_beats.yaml --mode finetune --dry-run
+```
+
+`--dry-run` 校验参数并打印合并后的配置，不加载模型、不检查数据文件内容，也不启动训练。
+配置文件内的所有相对路径以 **YAML 所在目录** 为基准。
+默认数据目录为项目的 `data_ready/train`、`data_ready/val`、`data_ready/test`，
+每个目录下按类别存放音频。
+
+`training.gpus: 0` 强制使用 CPU，正整数指定 GPU 数量。
+`model.model_path` 用于加载原始 BEATs 预训练权重，从零模式会忽略此参数；
+`resume_from_checkpoint` 用于恢复 Lightning 的完整训练状态。
+恢复训练需保持模式、模型结构、类别及数据划分一致；切换模式启动新实验时，
+应将恢复路径设为 `null`。
+
+`test_after_training: true` 会在训练结束后使用最佳可用检查点评估测试集
+（未保存最佳检查点时回退到最后检查点）；设为 `false` 时可将 `data.test_dir` 留空。
+训练参数和从零训练的模型结构均已在 YAML 中提供中文注释。
+
+
 ## Quick Start
 
 ### Fine-tuning (Recommended)
