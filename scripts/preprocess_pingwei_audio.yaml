@@ -1,0 +1,39 @@
+# 所有处理参数集中于本文件；相对路径以本 YAML 所在目录为基准。
+# Windows 路径建议使用正斜杠，或使用单引号避免反斜杠被 YAML 转义。
+input_dir: 'D:/pingwei-data/2026.8.19-1/#7机闭式水泵B'
+output_dir: '../data_ready/test/normal'
+
+# 扩展名不区分大小写，允许 wav 或 .wav；前后缀区分大小写，不含扩展名。
+extensions: [wav]
+filename_prefix: sync
+filename_suffix: 7fa13
+recursive: false
+
+# 先对每条原始录音整体抗混叠重采样，再从开头连续切分，无重叠。
+clip_seconds: 10
+target_sample_rate: 16000
+mono: true                       # true：多声道平均为单声道；false：保留原声道。
+wav_subtype: PCM_16               # 16 位 PCM；也可用 PCM_24 或 FLOAT。
+tail_policy: drop                # drop：丢弃不足 10 秒的尾段；pad：末尾补零至 10 秒。
+
+# 文件名：数据集-采集设备-被采设备.工况-YYMMDD.HHMM-标签-序号.wav
+dataset: pw
+collection_device: 7fa13
+target_device: '7.闭式水泵.C.mid'
+label: normal
+
+# 原文件主名示例：sync_20260824_125404_013715_7fa13
+# 列号从 1 开始；日期、时间两列用空格连接后按 input_datetime_format 解析。
+filename_separator: '_'
+date_column: 2
+time_column: 3
+input_datetime_format: '%Y%m%d %H%M%S'
+output_datetime_format: '%y%m%d.%H%M'
+
+# 每个输出时间字段从 0001 开始；同一分钟多份录音接续编号，防止重名。
+# sequence_width 是最小宽度；超过 9999 时自然扩展位数。
+sequence_start: 1
+sequence_width: 4
+overwrite: false                 # 已有同名文件时预检报错；true 允许覆盖。
+dry_run: false                   # true 仅预览匹配结果及切片数量，不写入文件。
+log_level: INFO
