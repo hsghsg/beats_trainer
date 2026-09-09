@@ -65,6 +65,12 @@ def setup_pytorch_lightning_trainer(config: Config, callbacks: List, log_dir) ->
     import torch
     from pytorch_lightning.loggers import TensorBoardLogger
 
+    gpu_count = config.training.gpus
+    if type(gpu_count) is not int or gpu_count < 0:
+        raise ValueError("training.gpus 必须为非负整数，0 表示使用 CPU")
+    if gpu_count > 0 and not torch.cuda.is_available():
+        raise ValueError("配置请求使用 GPU，但 CUDA 不可用；请将 training.gpus 设为 0")
+
     # Setup logger
     logger = TensorBoardLogger(
         save_dir=str(log_dir),
@@ -75,8 +81,8 @@ def setup_pytorch_lightning_trainer(config: Config, callbacks: List, log_dir) ->
     # Configure trainer
     trainer = pl.Trainer(
         max_epochs=config.training.max_epochs,
-        devices="auto" if torch.cuda.is_available() else 1,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        devices=gpu_count if gpu_count > 0 else 1,
+        accelerator="gpu" if gpu_count > 0 else "cpu",
         precision=config.training.precision,
         callbacks=callbacks,
         logger=logger,
