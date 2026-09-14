@@ -10,6 +10,7 @@ import pytorch_lightning as pl
 from ..core.config import Config
 from ..data.datasets import validate_dataset
 from ..data.module import BEATsDataModule
+from ..data.preprocessing import create_audio_preprocessor
 from ..core.model import BEATsLightningModule
 from ..core.feature_extractor import BEATsFeatureExtractor
 
@@ -102,6 +103,7 @@ class BEATsTrainer:
             validate_dataset(self.dataset, self.data_dir)
 
         # Setup data module
+        audio_preprocess = create_audio_preprocessor(self.config.data)
         if self._provided_data_module is not None:
             # Use provided data module (for pre-split scenarios)
             self.data_module = self._provided_data_module
@@ -111,6 +113,7 @@ class BEATsTrainer:
                 dataset=self.dataset,
                 data_dir=self.data_dir,
                 config=self.config.data,
+                transform=audio_preprocess,
             )
 
         # Setup data module to get number of classes
@@ -163,7 +166,7 @@ class BEATsTrainer:
         Test the model.
 
         Args:
-            checkpoint_path: Path to checkpoint to test
+            checkpoint_path: Path to checkpoint to use
 
         Returns:
             Dictionary with test results
@@ -261,3 +264,4 @@ class BEATsTrainer:
     def from_split_csvs(cls, *args, **kwargs):
         """Create trainer from pre-split CSV files."""
         return BEATsTrainerFactory.from_split_csvs(cls, *args, **kwargs)
+
