@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import json
 from pathlib import Path
 import zipfile
 
@@ -145,6 +146,69 @@ class TestMimiiDownloader(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         assert downloader.download_archive(self.root, spec, 0).read_bytes() == payload
+
+
+
+    def test_segmented_resume_and_interrupted_merge(self):
+        """分段模式复用单流前缀和已完成分段，合并中断后可从原始前缀恢复。"""
+        payload = b"0123456789abcdefghijklmnopqrstuvwxyz"
+        spec = downloader.ArchiveSpec(
+            "-6_dB_pump.zip", len(payload),
+            hashlib.md5(payload, usedforsecurity=False).hexdigest(),
+        )
+        for interrupted in (False, True):
+            with self.subTest(interrupted=interrupted):
+                root = self.root / str(interrupted)
+                root.mkdir()
+                (root / (spec.name + ".part")).write_bytes(payload[:8 if interrupted else 5])
+                segment_root = root / ".mimii_state/segments" / spec.name
+                if interrupted:
+                    segment_root.mkdir(parents=True)
+                    (segment_root / "plan.json").write_text(
+                        json.dumps({"size": spec.size, "md5": spec.md5, "base_offset": 5}),
+                        encoding="utf-8",
+                    )
+                    (segment_root / "000000000005.part").write_bytes(payload[5:12])
+
+                def open_range_response(request, timeout):
+                    """按测试请求返回准确范围，已完成的首分段不得重新请求。"""
+                    start, end = map(int, request.get_header("Range").removeprefix("bytes=").split("-"))
+                    if interrupted:
+                        assert start != 5
+                    response = io.BytesIO(payload[start:end + 1])
+                    response.status = 206
+                    response.headers = {"Content-Range": f"bytes {start}-{end}/{len(payload)}"}
+                    return response
+
+                with patch.object(downloader, "SEGMENT_SIZE", 7), patch.object(downloader, "RANGE_REQUEST_SIZE", 3):
+                    with patch.object(downloader.urllib.request, "urlopen", open_range_response):
+                        result = downloader.download_segmented(root, spec, 0, 2)
+                assert result.read_bytes() == payload
+                assert not segment_root.exists()
+
+    def test_segmented_bad_checksum_keeps_parts(self):
+        """分段合并后若官方 MD5 不匹配，保留完整临时包及分段，不生成完成 ZIP。"""
+        payload = b"0123456789abcdef"
+        spec = downloader.ArchiveSpec(
+            "-6_dB_pump.zip", len(payload),
+            hashlib.md5(payload, usedforsecurity=False).hexdigest(),
+        )
+
+        def open_corrupt_response(request, timeout):
+            """模拟长度和范围正确、实际内容损坏的 HTTP 分段响应。"""
+            start, end = map(int, request.get_header("Range").removeprefix("bytes=").split("-"))
+            response = io.BytesIO(b"x" * (end - start + 1))
+            response.status = 206
+            response.headers = {"Content-Range": f"bytes {start}-{end}/{len(payload)}"}
+            return response
+
+        with patch.object(downloader, "SEGMENT_SIZE", 7), patch.object(downloader, "RANGE_REQUEST_SIZE", 3):
+            with patch.object(downloader.urllib.request, "urlopen", open_corrupt_response):
+                with self.assertRaisesRegex(ValueError, "MD5"):
+                    downloader.download_segmented(self.root, spec, 0, 2)
+        assert (self.root / (spec.name + ".part")).exists()
+        assert not (self.root / spec.name).exists()
+        assert (self.root / ".mimii_state/segments" / spec.name / "plan.json").exists()
 
 
 if __name__ == "__main__":
