@@ -49,6 +49,25 @@ python scripts/train_beats.py --config scripts/train_beats.yaml --mode finetune 
 训练参数和从零训练的模型结构均已在 YAML 中提供中文注释。
 
 
+## CWT 幅值时频图前处理
+
+在 `data` 配置中新增 `audio_preprocess` 字段后，可在训练前选择：
+- `waveform` 或 `raw`：保持原始波形路径（与现有行为一致）。
+- `cwt`：使用连续小波变换（CWT）幅值时频图作为模型输入。
+
+`cwt` 时还需配置 `cwt_voices_per_octave`（每倍频程尺度数，默认 `12`）。
+训练端会自动对齐 padding_mask 到变换后时间长度，DataLoader 会按特征图时间维度进行 padding。
+
+### 与 `train_beats.yaml` 结合示例
+
+```yaml
+  data:
+    sample_rate: 16000
+    batch_size: 16
+    num_workers: 4
+    audio_preprocess: cwt
+    cwt_voices_per_octave: 12
+```
 ## Quick Start
 
 ### Fine-tuning (Recommended)
@@ -532,3 +551,4 @@ predictions = trainer.predict(["new_audio1.wav", "new_audio2.wav"])
 feature_extractor = trainer.get_feature_extractor()
 features = feature_extractor.extract_from_files(["audio1.wav", "audio2.wav"])
 ```
+

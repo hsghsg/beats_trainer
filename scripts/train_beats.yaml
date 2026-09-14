@@ -13,6 +13,8 @@ data:  # 各划分目录下按类别存放音频，例如 train/normal/*.wav
   sample_rate: 16000                # 输入采样率，单位 Hz
   batch_size:  16                   # 公共批量大小，可由各模式覆盖
   num_workers: 4                    # 数据加载进程数；排查多进程问题时设为 0
+  audio_preprocess: waveform       # 前处理：waveform/raw（原始波形）或 cwt（连续小波幅值时频图）
+  cwt_voices_per_octave: 12      # CWT每倍频程小波尺度个数
 
 model:  # 冻结和初始化策略由 mode 控制，类别数从数据推断
   model_path:      ../checkpoints/BEATs_iter3_plus_AS2M.pt  # 原始预训练 .pt；scratch 忽略；null 使用默认模型，缺失时尝试查找或下载
@@ -60,3 +62,4 @@ modes:  # 所选模式覆盖公共参数；以下为起点参数，可按数据�
       learning_rate: 1.0e-3  # 随机初始化模型的学习率
       max_epochs:    100     # 最大训练轮数
       patience:      15      # 早停耐心值
+

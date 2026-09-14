@@ -12,6 +12,7 @@ from ..data.datasets import (
     scan_directory_dataset,
 )
 from ..data.module import PreSplitDataModule
+from ..data.preprocessing import create_audio_preprocessor
 
 
 class BEATsTrainerFactory:
@@ -135,6 +136,10 @@ class BEATsTrainerFactory:
         val_df = scan_directory_dataset(val_dir)
         test_df = scan_directory_dataset(test_dir) if test_dir else None
 
+        audio_preprocess = None
+        if config is not None:
+            audio_preprocess = create_audio_preprocessor(config.data)
+
         # Create pre-split data module with explicit data directories
         data_module = PreSplitDataModule(
             train_data=train_df,
@@ -146,6 +151,7 @@ class BEATsTrainerFactory:
             batch_size=config.data.batch_size if config else 16,
             num_workers=config.data.num_workers if config else 4,
             sample_rate=config.data.sample_rate if config else 16000,
+            transform=audio_preprocess,
         )
 
         # Create trainer with pre-split data
@@ -192,14 +198,19 @@ class BEATsTrainerFactory:
             label_column=label_column,
         )
 
+        audio_preprocess = None
+        if config is not None:
+            audio_preprocess = create_audio_preprocessor(config.data)
+
         # Create pre-split data module
         data_module = PreSplitDataModule(
             train_data=train_df,
             val_data=val_df,
             test_data=test_df if test_df is not None and not test_df.empty else None,
-            batch_size=config.data.batch_size if config else 16,
+            batch_size=config.data.batch_size if config else 4,
             num_workers=config.data.num_workers if config else 4,
             sample_rate=config.data.sample_rate if config else 16000,
+            transform=audio_preprocess,
         )
 
         # Create trainer with pre-split data

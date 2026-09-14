@@ -30,7 +30,7 @@ MODE_NAMES = {
 }
 MODE_FIELDS = {"train_from_scratch", "freeze_backbone", "fine_tune_backbone"}
 SECTION_FIELDS = {
-    "data": {"sample_rate", "batch_size", "num_workers"},
+    "data": {"sample_rate", "batch_size", "num_workers", "audio_preprocess", "cwt_voices_per_octave"},
     "model": {item.name for item in fields(ModelConfig)}
     - MODE_FIELDS
     - {"num_classes"},
@@ -103,6 +103,13 @@ def validate_config(config: Config) -> None:
             value = getattr(getattr(config, section), name)
             if type(value) is not int or value < minimum:
                 raise ValueError(f"{section}.{name} 必须为不小于 {minimum} 的整数")
+
+    audio_preprocess = (config.data.audio_preprocess or "waveform").strip().lower()
+    if audio_preprocess not in ("waveform", "raw", "cwt"):
+        raise ValueError("data.audio_preprocess 仅支持 waveform、raw 或 cwt")
+    if type(config.data.cwt_voices_per_octave) is not int or config.data.cwt_voices_per_octave < 1:
+        raise ValueError("data.cwt_voices_per_octave 必须为正整数")
+
     for name in ("learning_rate", "weight_decay"):
         value = getattr(config.training, name)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
@@ -151,7 +158,7 @@ def validate_config(config: Config) -> None:
 
 
 def load_config(
-    config_path: Path, mode_override: str | None = None
+    config_path: Path, mode_override: str | None = None,
 ) -> TrainingSettings:
     """读取 UTF-8 YAML，合并公共参数与所选模式参数，并生成可执行的训练配置。
 

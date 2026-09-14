@@ -25,6 +25,8 @@ class DataConfig:
     clip_duration: Optional[float] = (
         None  # Clip duration in seconds (None = variable length)
     )
+    audio_preprocess: str = "waveform"
+    cwt_voices_per_octave: int = 12
 
     # Data splits
     train_split: float = 0.8

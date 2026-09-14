@@ -4,7 +4,7 @@ import librosa
 import torch
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Callable
 
 from torch.utils.data import DataLoader, Dataset
 from sklearn.preprocessing import LabelEncoder
@@ -50,9 +50,18 @@ def collate_audio_batch(
             current_length = audio.shape[0]
 
             if current_length < max_length:
-                # Pad with zeros
+                # 按时间维度补齐，支持 1D 波形与 2D 特征图
                 padding_needed = max_length - current_length
-                padded = torch.nn.functional.pad(audio, (0, padding_needed), value=0.0)
+                if audio.dim() == 1:
+                    padded = torch.nn.functional.pad(
+                        audio, (0, padding_needed), value=0.0
+                    )
+                elif audio.dim() == 2:
+                    padded = torch.nn.functional.pad(
+                        audio, (0, 0, 0, padding_needed), value=0.0
+                    )
+                else:
+                    raise ValueError("样本张量维度不合法，支持 1D 波形或 2D 时频图")
 
                 # Update padding mask (True = padded/masked, False = real audio)
                 new_mask = torch.cat(
@@ -87,7 +96,7 @@ class AudioDataset(Dataset):
         data_dir: Path,
         sample_rate: int = 16000,
         clip_duration: Optional[float] = None,
-        transform=None,
+        transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ):
         self.dataframe = dataframe
         self.data_dir = data_dir
@@ -150,7 +159,45 @@ class AudioDataset(Dataset):
 
         # Apply transform if any
         if self.transform:
-            audio_tensor = self.transform(audio_tensor)
+            transformed = self.transform(audio_tensor)
+
+            if not torch.is_tensor(transformed):
+                raise TypeError("音频预处理函数必须返回 torch.Tensor")
+
+            if transformed.dim() != 1 and transformed.dim() != 2:
+                raise ValueError("预处理输出必须是 1D 波形或 2D 时频图")
+
+            # 原始 padding mask 以变换前长度为准，需按输出时间轴重映射
+            target_length = transformed.shape[0]
+            source_length = padding_mask.numel()
+            if target_length != source_length:
+                if target_length == 0:
+                    padding_mask = torch.ones(
+                        target_length, dtype=torch.bool, device=padding_mask.device
+                    )
+                elif not padding_mask.any():
+                    padding_mask = torch.zeros(
+                        target_length, dtype=torch.bool, device=padding_mask.device
+                    )
+                else:
+                    first_padding = int(torch.nonzero(padding_mask, as_tuple=False)[0, 0])
+                    valid_length = min(first_padding, source_length)
+                    mapped_valid_length = int(
+                        round(valid_length * target_length / float(source_length))
+                    )
+                    mapped_valid_length = max(
+                        0, min(mapped_valid_length, target_length)
+                    )
+                    padding_mask = torch.cat(
+                        [
+                            torch.zeros(mapped_valid_length, dtype=torch.bool),
+                            torch.ones(
+                                target_length - mapped_valid_length, dtype=torch.bool
+                            ),
+                        ]
+                    )
+
+            audio_tensor = transformed
 
         # Encode label
         label = self.label_encoder.transform([row["category"]])[0]
@@ -168,12 +215,14 @@ class BEATsDataModule(pl.LightningDataModule):
         train_df: Optional[pd.DataFrame] = None,
         val_df: Optional[pd.DataFrame] = None,
         test_df: Optional[pd.DataFrame] = None,
+        transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ):
         super().__init__()
         self.dataset = dataset
         self.data_dir = data_dir
         self.config = config
         self.pre_split = pre_split
+        self.transform = transform
 
         # For pre-split datasets
         self.train_df = train_df
@@ -204,6 +253,7 @@ class BEATsDataModule(pl.LightningDataModule):
                 self.data_dir,
                 self.config.sample_rate,
                 clip_duration=self.config.clip_duration,
+                transform=self.transform,
             )
 
         if self.val_df is not None and len(self.val_df) > 0:
@@ -212,6 +262,7 @@ class BEATsDataModule(pl.LightningDataModule):
                 self.data_dir,
                 self.config.sample_rate,
                 clip_duration=self.config.clip_duration,
+                transform=self.transform,
             )
 
         if self.test_df is not None and len(self.test_df) > 0:
@@ -220,6 +271,7 @@ class BEATsDataModule(pl.LightningDataModule):
                 self.data_dir,
                 self.config.sample_rate,
                 clip_duration=self.config.clip_duration,
+                transform=self.transform,
             )
 
     def _setup_auto_split(self):
@@ -258,6 +310,7 @@ class BEATsDataModule(pl.LightningDataModule):
             self.data_dir,
             self.config.sample_rate,
             clip_duration=self.config.clip_duration,
+            transform=self.transform,
         )
 
         if len(val) > 0:
@@ -266,6 +319,7 @@ class BEATsDataModule(pl.LightningDataModule):
                 self.data_dir,
                 self.config.sample_rate,
                 clip_duration=self.config.clip_duration,
+                transform=self.transform,
             )
 
         if len(test) > 0:
@@ -274,6 +328,7 @@ class BEATsDataModule(pl.LightningDataModule):
                 self.data_dir,
                 self.config.sample_rate,
                 clip_duration=self.config.clip_duration,
+                transform=self.transform,
             )
 
     def train_dataloader(self):
@@ -326,6 +381,7 @@ class PreSplitDataModule(pl.LightningDataModule):
         num_workers: int = 4,
         sample_rate: int = 16000,
         clip_duration: Optional[float] = None,
+        transform: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ):
         super().__init__()
         self.train_data = train_data
@@ -338,6 +394,7 @@ class PreSplitDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.sample_rate = sample_rate
         self.clip_duration = clip_duration
+        self.transform = transform
 
         self.train_dataset = None
         self.val_dataset = None
@@ -364,6 +421,7 @@ class PreSplitDataModule(pl.LightningDataModule):
             train_data_dir,
             self.sample_rate,
             clip_duration=self.clip_duration,
+            transform=self.transform,
         )
 
         if self.val_data is not None and len(self.val_data) > 0:
@@ -373,6 +431,7 @@ class PreSplitDataModule(pl.LightningDataModule):
                 val_data_dir,
                 self.sample_rate,
                 clip_duration=self.clip_duration,
+                transform=self.transform,
             )
 
         if self.test_data is not None and len(self.test_data) > 0:
@@ -382,6 +441,7 @@ class PreSplitDataModule(pl.LightningDataModule):
                 test_data_dir,
                 self.sample_rate,
                 clip_duration=self.clip_duration,
+                transform=self.transform,
             )
 
         # Store number of classes

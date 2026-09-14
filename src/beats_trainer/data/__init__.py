@@ -9,6 +9,7 @@ from .datasets import (
     load_split_directories,
     load_split_csvs,
 )
+from .preprocessing import create_audio_preprocessor
 from .module import BEATsDataModule, PreSplitDataModule
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "load_esc50",
     "load_split_directories",
     "load_split_csvs",
+    "create_audio_preprocessor",
     "BEATsDataModule",
     "PreSplitDataModule",
 ]

@@ -244,9 +244,27 @@ class BEATs(nn.Module):
         fbank_mean: float = 15.41663,
         fbank_std: float = 6.55582,
     ) -> torch.Tensor:
-        fbanks = []
-        for waveform in source:
-            waveform = waveform.unsqueeze(0) * 2**15
+        """将不同来源的输入特征对齐到 BEATs 的卷积输入格式。"""
+        # 1) 若已经是 [B, time, freq] 的特征图，直接透传。
+        # 2) 若是 [B, time] 的波形，按批次逐条计算 fbank。
+        # 3) 若是 [time] 的单段波形，补齐 batch 维后计算 fbank。
+        if source.dim() == 3:
+            fbank = source
+        elif source.dim() == 2:
+            fbanks = []
+            for waveform in source:
+                waveform = waveform.unsqueeze(0) * 2**15
+                item_fbank = ta_kaldi.fbank(
+                    waveform,
+                    num_mel_bins=128,
+                    sample_frequency=16000,
+                    frame_length=25,
+                    frame_shift=10,
+                )
+                fbanks.append(item_fbank)
+            fbank = torch.stack(fbanks, dim=0)
+        elif source.dim() == 1:
+            waveform = source.unsqueeze(0) * 2**15
             fbank = ta_kaldi.fbank(
                 waveform,
                 num_mel_bins=128,
@@ -254,8 +272,10 @@ class BEATs(nn.Module):
                 frame_length=25,
                 frame_shift=10,
             )
-            fbanks.append(fbank)
-        fbank = torch.stack(fbanks, dim=0)
+            fbank = fbank.unsqueeze(0)
+        else:
+            raise ValueError("Unsupported source dimension for BEATs preprocess")
+
         fbank = (fbank - fbank_mean) / (2 * fbank_std)
         return fbank
 
@@ -308,3 +328,4 @@ class BEATs(nn.Module):
             return lprobs, padding_mask
         else:
             return x, padding_mask
+
