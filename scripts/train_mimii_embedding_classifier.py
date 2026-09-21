@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.metrics import f1_score
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
@@ -197,7 +198,7 @@ def extract_split_features(
     max_files: int | None,
     recompute_features: bool,
 ) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    """Load cached embeddings or extract BEATs embeddings for one data split."""
+    """读取分区缓存，或按批提取特征并显示样本进度，保存后返回特征、标签及路径。"""
     if cache_path.exists() and not recompute_features:
         print(f"\u8bfb\u53d6\u7f13\u5b58\u7279\u5f81\uff1a{cache_path}")
         return load_cached_features(cache_path)
@@ -208,10 +209,24 @@ def extract_split_features(
         f"\u5f00\u59cb\u63d0\u53d6 {split_name} \u7279\u5f81\uff0c"
         f"\u6837\u672c\u6570\uff1a{len(audio_paths)}"
     )
-    features = extractor.extract_from_files(
-        [str(path) for path in audio_paths],
-        batch_size=extract_batch_size,
-    )
+    if extract_batch_size <= 0:
+        raise ValueError("特征提取批大小必须大于 0。")
+    feature_batches: list[np.ndarray] = []
+    with tqdm(
+        total=len(audio_paths),
+        desc=f"提取 {split_name} 特征",
+        unit="样本",
+        dynamic_ncols=True,
+    ) as progress:
+        for batch_start in range(0, len(audio_paths), extract_batch_size):
+            batch_paths = audio_paths[batch_start : batch_start + extract_batch_size]
+            batch_features = extractor.extract_from_files(
+                [str(path) for path in batch_paths],
+                batch_size=extract_batch_size,
+            )
+            feature_batches.append(batch_features)
+            progress.update(len(batch_paths))
+    features = np.concatenate(feature_batches, axis=0)
     save_cached_features(cache_path, features, labels, audio_paths)
     return features, labels, [str(path) for path in audio_paths]
 
