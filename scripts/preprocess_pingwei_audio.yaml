@@ -1,39 +1,40 @@
 # 所有处理参数集中于本文件；相对路径以本 YAML 所在目录为基准。
 # Windows 路径建议使用正斜杠，或使用单引号避免反斜杠被 YAML 转义。
-input_dir: 'D:/pingwei-data/2026.8.19-1/#7机闭式水泵B'
-output_dir: '../data_ready/test/normal'
-
-# 扩展名不区分大小写，允许 wav 或 .wav；前后缀区分大小写，不含扩展名。
-extensions: [wav]
-filename_prefix: sync
-filename_suffix: 7fa13
-recursive: false
-
-# 先对每条原始录音整体抗混叠重采样，再从开头连续切分，无重叠。
-clip_seconds: 10
-target_sample_rate: 16000
-mono: true                       # true：多声道平均为单声道；false：保留原声道。
-wav_subtype: PCM_16               # 16 位 PCM；也可用 PCM_24 或 FLOAT。
-tail_policy: drop                # drop：丢弃不足 10 秒的尾段；pad：末尾补零至 10 秒。
+input_dir: D:\pingwei-data\2026.8.24-1\#7机闭式水泵C  # 原始音频所在目录。
+output_dir: '../dataset/tofusion/noise'                          # 处理后音频的输出目录。
 
 # 文件名：数据集-采集设备-被采设备.工况-YYMMDD.HHMM-标签-序号.wav
-dataset: pw
-collection_device: 7fa13
-target_device: '7.闭式水泵.C.mid'
-label: normal
+dataset: pw                                             # 输出文件名中的数据集标识。
+collection_device: 7fa13                                # 输出文件名中的采集设备标识。
+target_device: '7.闭式水泵.C.mid'                       # 输出文件名中的被采设备及工况标识。
+label: normal                                           # 输出文件名中的类别标签，如 normal 表示正常。
+
+# 扩展名不区分大小写，允许 wav 或 .wav；前后缀区分大小写，不含扩展名。
+extensions: [wav]                                       # 需要处理的音频扩展名。
+filename_prefix: sync                                   # 仅处理文件主名以此字符串开头的音频。
+filename_suffix: 7fa13                                  # 仅处理文件主名以此字符串结尾的音频。
+recursive: false                                        # true：递归扫描子目录；false：仅扫描输入目录。
+
+# 先整体抗混叠重采样，再按起点间隔采样；当前配置截取 0–10、60–70、120–130 秒。
+clip_seconds: 10                                        # 每个输出音频片段的时长，单位：秒。
+interval_seconds: 60                                    # 相邻采样起点的间隔，单位：秒；60 表示每分钟采样一次。
+target_sample_rate: 16000                               # 输出音频采样率，单位：Hz。
+mono: true                                              # true：多声道平均为单声道；false：保留原声道。
+wav_subtype: PCM_16                                     # 16 位 PCM；也可用 PCM_24 或 FLOAT。
+tail_policy: drop                                       # drop：丢弃不足一段的采样窗口；pad：末尾补零至 clip_seconds。
 
 # 原文件主名示例：sync_20260824_125404_013715_7fa13
 # 列号从 1 开始；日期、时间两列用空格连接后按 input_datetime_format 解析。
-filename_separator: '_'
-date_column: 2
-time_column: 3
-input_datetime_format: '%Y%m%d %H%M%S'
-output_datetime_format: '%y%m%d.%H%M'
+filename_separator: '_'                                 # 拆分原始文件主名时使用的分隔符。
+date_column: 2                                          # 原始文件主名中日期字段的列号，从 1 开始。
+time_column: 3                                          # 原始文件主名中时间字段的列号，从 1 开始。
+input_datetime_format: '%Y%m%d %H%M%S'                  # 原始日期时间的解析格式：四位年、月、日及时、分、秒。
+output_datetime_format: '%y%m%d.%H%M'                   # 输出文件名的时间格式：两位年月日.时分。
 
-# 每个输出时间字段从 0001 开始；同一分钟多份录音接续编号，防止重名。
+# 本次处理的全部输出从 0001 开始连续编号，不随源文件或时间字段重置。
 # sequence_width 是最小宽度；超过 9999 时自然扩展位数。
-sequence_start: 1
-sequence_width: 4
-overwrite: false                 # 已有同名文件时预检报错；true 允许覆盖。
-dry_run: false                   # true 仅预览匹配结果及切片数量，不写入文件。
-log_level: INFO
+sequence_start: 1                                       # 本次处理的全局起始序号，跨文件和时间字段连续递增。
+sequence_width: 4                                       # 序号最小位数，不足时在左侧补零。
+overwrite: false                                        # 已有同名文件时预检报错；true 允许覆盖。
+dry_run: false                                          # true 仅预览匹配结果及切片数量，不写入文件。
+log_level: INFO                                         # 日志级别，如 DEBUG、INFO、WARNING、ERROR。

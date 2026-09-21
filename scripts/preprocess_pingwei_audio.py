@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
-from collections import defaultdict
+
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +33,7 @@ class ProcessingConfig:
     filename_suffix: str
     recursive: bool
     clip_seconds: float
+    interval_seconds: float
     target_sample_rate: int
     mono: bool
     wav_subtype: str
@@ -56,6 +57,11 @@ class ProcessingConfig:
     def clip_frames(self) -> int:
         """返回目标采样率下每段的整数采样帧数；配置加载时保证结果有效。"""
         return round(self.clip_seconds * self.target_sample_rate)
+
+    @property
+    def interval_frames(self) -> int:
+        """返回相邻切片起点间隔的整数帧数；加载配置时保证为正数且不小于片段帧数。"""
+        return round(self.interval_seconds * self.target_sample_rate)
 
 
 @dataclass(frozen=True)
@@ -87,6 +93,7 @@ def load_config(config_path: Path) -> ProcessingConfig:
 
     缺失、多余、类型错误、无效音频编码及无法得到整数采样帧的参数均抛出
     ValueError；不创建目录，也不修改输入或输出文件。
+    旧配置未指定 interval_seconds 时使用 clip_seconds，保持连续切片行为。
     """
     config_path = config_path.expanduser().resolve()
     with config_path.open("r", encoding="utf-8-sig") as stream:
@@ -94,6 +101,8 @@ def load_config(config_path: Path) -> ProcessingConfig:
     if not isinstance(values, dict):
         raise ValueError("YAML 顶层必须是参数映射")
     try:
+        if "clip_seconds" in values:
+            values.setdefault("interval_seconds", values["clip_seconds"])
         config = ProcessingConfig(**values)
     except TypeError as error:
         raise ValueError(f"YAML 参数缺失或存在未知参数：{error}") from error
@@ -128,19 +137,23 @@ def load_config(config_path: Path) -> ProcessingConfig:
     for name in string_fields:
         if not isinstance(values[name], str) or not values[name].strip():
             raise ValueError(f"{name} 必须为非空字符串")
-    if (
-        type(config.clip_seconds) not in (int, float)
-        or not math.isfinite(config.clip_seconds)
-        or config.clip_seconds <= 0
-    ):
-        raise ValueError("clip_seconds 必须为有限正数")
-    frame_count = config.clip_seconds * config.target_sample_rate
-    if (
-        not math.isfinite(frame_count)
-        or round(frame_count) < 1
-        or not math.isclose(frame_count, round(frame_count), rel_tol=0, abs_tol=1e-7)
-    ):
-        raise ValueError("clip_seconds × target_sample_rate 必须为正整数")
+    for name in ("clip_seconds", "interval_seconds"):
+        seconds = getattr(config, name)
+        if (
+            type(seconds) not in (int, float)
+            or not math.isfinite(seconds)
+            or seconds <= 0
+        ):
+            raise ValueError(f"{name} 必须为有限正数")
+        frame_count = seconds * config.target_sample_rate
+        if (
+            not math.isfinite(frame_count)
+            or round(frame_count) < 1
+            or not math.isclose(frame_count, round(frame_count), rel_tol=0, abs_tol=1e-7)
+        ):
+            raise ValueError(f"{name} × target_sample_rate 必须为正整数")
+    if config.interval_seconds < config.clip_seconds:
+        raise ValueError("interval_seconds 不能小于 clip_seconds，以避免切片重叠")
     if not isinstance(config.extensions, list) or not config.extensions:
         raise ValueError("extensions 必须为非空扩展名列表，如 [wav]")
     extensions = []
@@ -199,7 +212,8 @@ def build_plan(config: ProcessingConfig) -> list[SourcePlan]:
     """预检全部匹配文件并返回稳定排序的切片计划，任何重名冲突均在写入前报错。
 
     扩展名不区分大小写，前后缀匹配不含扩展名的主名且区分大小写。
-    相同输出时间字段的文件接续编号，其他时间字段从 sequence_start 重新编号。
+    全部文件共用递增序号，从 sequence_start 开始，不随源文件或输出时间字段重置。
+    从录音起点按 interval_seconds 间隔取样，按 tail_policy 处理采样窗口的不足尾段。
     """
     if not config.input_dir.is_dir():
         raise FileNotFoundError(f"输入目录不存在：{config.input_dir}")
@@ -218,7 +232,7 @@ def build_plan(config: ProcessingConfig) -> list[SourcePlan]:
         raise ValueError(
             f"没有找到符合扩展名、前缀和后缀条件的文件：{config.input_dir}"
         )
-    next_sequences: dict[str, int] = defaultdict(int)
+    next_sequence = config.sequence_start
     plans = []
     for path in paths:
         timestamp = extract_timestamp(path, config)
@@ -226,11 +240,15 @@ def build_plan(config: ProcessingConfig) -> list[SourcePlan]:
         target_frames = (
             info.frames * config.target_sample_rate + info.samplerate - 1
         ) // info.samplerate
-        clip_count, remainder = divmod(target_frames, config.clip_frames)
+        clip_count = max(
+            0, (target_frames - config.clip_frames) // config.interval_frames + 1
+        )
+        # 仅检查下一个采样起点；间隔中被跳过的音频不作为尾段输出。
+        remainder = max(0, target_frames - clip_count * config.interval_frames)
         if remainder and config.tail_policy == "pad":
             clip_count += 1
-        first_sequence = config.sequence_start + next_sequences[timestamp.casefold()]
-        next_sequences[timestamp.casefold()] += clip_count
+        first_sequence = next_sequence
+        next_sequence += clip_count
         plan = SourcePlan(
             path,
             info.samplerate,
@@ -321,8 +339,13 @@ def run(config: ProcessingConfig) -> dict[str, int]:
     """预检并逐文件执行处理，返回源文件、计划切片和实际写入数量。
 
     dry_run=true 时仅读取文件头，绝不创建输出目录；drop 丢弃不足一段的尾部，
-    pad 将末段补零至完整长度。任意文件失败即停止，保留此前成功生成的片段。
+    pad 将末段补零至完整长度；只处理间隔采样窗口，跳过窗口之间的音频。
+    任意文件失败即停止，保留此前成功生成的片段。
     """
+    LOGGER.info(
+        "采样设置：每隔 %.3f 秒截取 %.3f 秒音频",
+        config.interval_seconds, config.clip_seconds,
+    )
     plans = build_plan(config)
     summary = {
         "source_files": len(plans),
@@ -346,7 +369,7 @@ def run(config: ProcessingConfig) -> dict[str, int]:
             continue
         audio = load_resampled_audio(plan, config)
         for clip_index in range(plan.clip_count):
-            start = clip_index * config.clip_frames
+            start = clip_index * config.interval_frames
             clip = audio[start : start + config.clip_frames]
             if len(clip) < config.clip_frames:
                 clip = np.pad(clip, ((0, config.clip_frames - len(clip)), (0, 0)))
