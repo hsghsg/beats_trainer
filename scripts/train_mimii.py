@@ -26,7 +26,7 @@ def main() -> None:
         config=config,
     )
 
-    #trainer.train()
+    trainer.train()
     trainer.test()
 
 

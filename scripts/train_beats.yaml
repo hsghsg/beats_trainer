@@ -1,7 +1,7 @@
 # 启动：python scripts/train_beats.py；检查配置：追加 --dry-run；临时切换模式：追加 --mode finetune
 
-mode:                   head        # head：分类头训练；finetune：全量微调；scratch：从零训练
-experiment_name:        mimii_pump  # 实验名，自动追加模式后缀
+mode:                   finetune        # head：分类头训练；finetune：全量微调；scratch：从零训练
+experiment_name:        pump_pw_7fa13  # 实验名，自动追加模式后缀
 log_dir:                ../logs     # 日志与检查点目录；相对路径均以本 YAML 所在目录为基准
 test_after_training:    true        # 训练后使用最佳可用检查点评估测试集
 resume_from_checkpoint: null        # 恢复训练用的 .ckpt；null 为新训练；恢复时保持模式、结构及数据一致
