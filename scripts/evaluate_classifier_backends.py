@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""在测试集上评估 BEATs 原生分类器和自定义 embedding 分类器后端。"""
+r"""在测试集上评估 BEATs 原生分类器和自定义 embedding 分类器后端。
+python .\scripts\evaluate_classifier_backends.py `
+  --recompute-features `
+  --extract-batch-size 16 `
+  --native-batch-size 16 `
+  --output-dir artifacts/classifier_backend_evaluation_fresh
+  """
 
 from __future__ import annotations
 
@@ -39,8 +45,8 @@ from train_mimii_embedding_classifier import (  # noqa: E402
 
 DEFAULT_NATIVE_CHECKPOINT = (
     Path("logs")
-    / "mimii_pump_baseline"
-    / "version_1"
+    / "pump_pw_7fa13_finetune"
+    / "version_3"
     / "checkpoints"
     / "last.ckpt"
 )
@@ -54,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--data-dir", type=Path, default=Path("data_ready"))
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--test-dir", type=Path, help="新的测试集目录；指定后只重算测试特征。")
+    parser.add_argument(
+        "--train-feature-cache", type=Path,
+        help="复用已有训练特征 NPZ，可指向其他评估输出目录；模型和训练数据须一致。",
+    )
     parser.add_argument(
         "--native-checkpoint",
         type=Path,
@@ -66,13 +77,21 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="用于提取 embedding 的 checkpoint；默认复用 native checkpoint。",
     )
-    parser.add_argument("--device", default="auto", help="auto/cuda/cpu，默认 auto。")
+    parser.add_argument("--device", default="cuda", help="auto/cuda/cpu，默认 auto。")
     parser.add_argument("--extract-batch-size", type=int, default=16)
     parser.add_argument("--native-batch-size", type=int, default=16)
     parser.add_argument("--positive-label", default="abnormal")
     parser.add_argument("--pauc-max-fpr", type=float, default=0.1)
     parser.add_argument("--max-files-per-split", type=int, default=None)
-    parser.add_argument("--recompute-features", action="store_true")
+    parser.add_argument(
+        "--recompute-features", "--recompute-test-features",
+        dest="recompute_features", action="store_true",
+        help="重新提取测试集特征，保留训练集缓存。",
+    )
+    parser.add_argument(
+        "--recompute-train-features", action="store_true",
+        help="显式重新提取训练集特征；更换特征模型或训练数据时使用。",
+    )
     parser.add_argument("--skip-native", action="store_true")
     return parser.parse_args()
 
@@ -116,6 +135,53 @@ def binary_targets(labels: np.ndarray, positive_label: str) -> np.ndarray:
     return (labels == positive_label).astype(np.int64)
 
 
+def threshold_error_rates(y_true: np.ndarray, scores: np.ndarray) -> dict[str, Any]:
+    """按正类分数不低于阈值的规则计算 FAR、FRR，并线性插值估计 EER 交点。
+
+    Args:
+        y_true: 同时包含 0 和 1 的真实二分类标签，一维数组。
+        scores: 与标签顺序一致的有限正类分数，一维数组。
+
+    Returns:
+        升序有限阈值、FAR=FPR、FRR=1-TPR，以及插值 EER 和阈值。
+        离散分数下插值交点不保证可由单个实际阈值精确实现。
+
+    Raises:
+        ValueError: 输入形状、类别或分数不满足二分类计算条件。
+    """
+    y_true = np.asarray(y_true)
+    scores = np.asarray(scores, dtype=float)
+    if y_true.ndim != 1 or scores.ndim != 1 or y_true.shape != scores.shape:
+        raise ValueError("标签与分数必须是一维且长度一致。")
+    if not np.array_equal(np.unique(y_true), [0, 1]) or not np.isfinite(scores).all():
+        raise ValueError("FAR/FRR 计算需要正负两类样本和有限分数。")
+    far, tpr, thresholds = roc_curve(y_true, scores, drop_intermediate=False)
+    # 使用高于最高分的有限阈值替换 sklearn 的无穷大起点，保留全拒绝端点。
+    thresholds[0] = np.nextafter(scores.max(), np.inf)
+    if not np.isfinite(thresholds[0]):
+        raise ValueError("分数过大，无法生成有限的全拒绝阈值。")
+    thresholds = thresholds[::-1]
+    far = far[::-1]
+    frr = (1.0 - tpr)[::-1]
+    difference = far - frr
+    right = int(np.flatnonzero(difference <= 0)[0])
+    if difference[right] == 0:
+        eer = float(far[right])
+        eer_threshold = float(thresholds[right])
+    else:
+        left = right - 1
+        weight = difference[left] / (difference[left] - difference[right])
+        eer = float(far[left] + weight * (far[right] - far[left]))
+        eer_threshold = float(thresholds[left] + weight * (thresholds[right] - thresholds[left]))
+    return {
+        "error_thresholds": thresholds,
+        "far": far,
+        "frr": frr,
+        "EER": eer,
+        "EER_threshold": eer_threshold,
+    }
+
+
 def evaluate_scores(
     backend: str,
     labels: np.ndarray,
@@ -124,11 +190,12 @@ def evaluate_scores(
     positive_label: str,
     pauc_max_fpr: float,
 ) -> dict[str, Any]:
-    """计算一个后端的 accuracy、recall、f1、AUC、pAUC 和 ROC 曲线数据。"""
+    """计算分类指标、ROC、阈值 FAR/FRR 曲线及插值 EER 阈值。"""
     y_true = binary_targets(labels, positive_label)
     fpr, tpr, thresholds = roc_curve(y_true, scores)
     return {
         "backend": backend,
+        **threshold_error_rates(y_true, scores),
         "accuracy": float(accuracy_score(labels, predictions)),
         "recall": float(recall_score(labels, predictions, pos_label=positive_label, zero_division=0)),
         "f1": float(f1_score(labels, predictions, pos_label=positive_label, zero_division=0)),
@@ -316,19 +383,22 @@ def metric_row(result: dict[str, Any]) -> dict[str, str]:
         "f1": f"{result['f1']:.6f}",
         "AUC": f"{result['AUC']:.6f}",
         "pAUC": f"{result['pAUC']:.6f}",
+        "EER": f"{result['EER']:.6f}",
+        "EER_threshold": f"{result['EER_threshold']:.6f}",
     }
 
 
 def metrics_table(results: list[dict[str, Any]]) -> str:
-    """生成包含 accuracy、recall、f1、AUC、pAUC 的 Markdown 表格。"""
+    """生成分类指标、AUC/pAUC、插值 EER 和对应阈值的 Markdown 表格。"""
     lines = [
-        "| backend | accuracy | recall | f1 | AUC | pAUC |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| backend | accuracy | recall | f1 | AUC | pAUC | EER | EER_threshold |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for result in results:
         row = metric_row(result)
         lines.append(
-            "| {backend} | {accuracy} | {recall} | {f1} | {AUC} | {pAUC} |".format(**row)
+            "| {backend} | {accuracy} | {recall} | {f1} | {AUC} | {pAUC} | "
+            "{EER} | {EER_threshold} |".format(**row)
         )
     return "\n".join(lines)
 
@@ -354,7 +424,7 @@ def write_metrics_files(
 ) -> None:
     """输出 CSV、Markdown 和 JSON 三种评估结果文件。"""
     output_dir.mkdir(parents=True, exist_ok=True)
-    fieldnames = ["backend", "accuracy", "recall", "f1", "AUC", "pAUC"]
+    fieldnames = ["backend", "accuracy", "recall", "f1", "AUC", "pAUC", "EER", "EER_threshold"]
     with (output_dir / "metrics.csv").open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.DictWriter(output_file, fieldnames=fieldnames)
         writer.writeheader()
@@ -366,6 +436,7 @@ def write_metrics_files(
             "",
             f"- 正类标签：`{positive_label}`",
             f"- 标准化 pAUC 最大 FPR：`{pauc_max_fpr}`",
+            "- EER 与对应阈值由 FAR/FRR 曲线线性插值估计。",
             "",
             metrics_table(results),
             "",
@@ -434,6 +505,38 @@ def roc_points(
     return " ".join(f"{x:.2f},{y:.2f}" for x, y in points)
 
 
+def roc_axis_ticks(left: int, top: int, width: int, height: int) -> str:
+    """根据绘图区的像素位置和尺寸，生成两轴 0.0～1.0、间隔 0.1 的 SVG 刻度线及标签。
+
+    Args:
+        left: 绘图区左边界的像素坐标。
+        top: 绘图区上边界的像素坐标。
+        width: 绘图区的像素宽度。
+        height: 绘图区的像素高度。
+
+    Returns:
+        可嵌入 ROC SVG 的横纵轴刻度线和数值标签片段。
+    """
+    ticks: list[str] = []
+    bottom = top + height
+    for index in range(11):
+        value = index / 10
+        x, y = svg_point(value, value, left, top, width, height)
+        ticks.extend(
+            [
+                f'<line x1="{x:.2f}" y1="{bottom}" x2="{x:.2f}" '
+                f'y2="{bottom + 6}" stroke="#334155"/>',
+                f'<text x="{x:.2f}" y="{bottom + 22}" text-anchor="middle" '
+                f'font-family="Arial, sans-serif" font-size="12">{value:.1f}</text>',
+                f'<line x1="{left - 6}" y1="{y:.2f}" x2="{left}" '
+                f'y2="{y:.2f}" stroke="#334155"/>',
+                f'<text x="{left - 12}" y="{y + 4:.2f}" text-anchor="end" '
+                f'font-family="Arial, sans-serif" font-size="12">{value:.1f}</text>',
+            ]
+        )
+    return "\n  ".join(ticks)
+
+
 def write_single_roc_svg(output_path: Path, result: dict[str, Any]) -> None:
     """为单个后端分类器绘制独立 ROC/AUC SVG 曲线。"""
     left, top, width, height = 82, 72, 560, 390
@@ -449,12 +552,7 @@ def write_single_roc_svg(output_path: Path, result: dict[str, Any]) -> None:
   <polyline points="{points}" fill="none" stroke="#2563eb" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
   <text x="{left + width / 2}" y="{top + height + 54}" text-anchor="middle" font-family="Arial, sans-serif" font-size="15">False Positive Rate</text>
   <text x="24" y="{top + height / 2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" transform="rotate(-90 24 {top + height / 2})">True Positive Rate</text>
-  <text x="{left}" y="{top + height + 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12">0.0</text>
-  <text x="{left + width / 2}" y="{top + height + 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12">0.5</text>
-  <text x="{left + width}" y="{top + height + 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12">1.0</text>
-  <text x="{left - 18}" y="{top + height + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.0</text>
-  <text x="{left - 18}" y="{top + height / 2 + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="12">0.5</text>
-  <text x="{left - 18}" y="{top + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="12">1.0</text>
+  {roc_axis_ticks(left, top, width, height)}
 </svg>
 """
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -496,6 +594,7 @@ def write_combined_roc_svg(output_path: Path, results: list[dict[str, Any]]) -> 
   <line x1="{start[0]:.2f}" y1="{start[1]:.2f}" x2="{end[0]:.2f}" y2="{end[1]:.2f}" stroke="#94a3b8" stroke-width="2" stroke-dasharray="8 8"/>
   {' '.join(curves)}
   {' '.join(legends)}
+  {roc_axis_ticks(left, top, width, height)}
   <text x="{left + width / 2}" y="{top + height + 54}" text-anchor="middle" font-family="Arial, sans-serif" font-size="15">False Positive Rate</text>
   <text x="24" y="{top + height / 2}" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" transform="rotate(-90 24 {top + height / 2})">True Positive Rate</text>
 </svg>
@@ -504,11 +603,69 @@ def write_combined_roc_svg(output_path: Path, results: list[dict[str, Any]]) -> 
     output_path.write_text(svg, encoding="utf-8")
 
 
+def write_threshold_error_svg(output_path: Path, result: dict[str, Any]) -> None:
+    """为一个分类器输出阈值 FAR/FRR SVG，标记插值 EER 交点及阈值辅助线。
+
+    Args:
+        output_path: SVG 输出路径，父目录不存在时自动创建。
+        result: 包含 backend、error_thresholds、far、frr、EER、EER_threshold 的结果。
+
+    Returns:
+        无；将横轴为分数阈值、纵轴为错误率的曲线写入指定文件。
+    """
+    left, top, width, height = 82, 96, 640, 390
+    thresholds = result["error_thresholds"]
+    minimum = min(0.0, float(thresholds[0]))
+    maximum = max(1.0, float(thresholds[-1]))
+    span = maximum - minimum
+    normalized = (thresholds - minimum) / span
+    far_points = roc_points(normalized, result["far"], left, top, width, height)
+    frr_points = roc_points(normalized, result["frr"], left, top, width, height)
+    eer_x, eer_y = svg_point(
+        (result["EER_threshold"] - minimum) / span, result["EER"], left, top, width, height,
+    )
+    ticks: list[str] = []
+    bottom = top + height
+    for index in range(11):
+        fraction = index / 10
+        x, y = svg_point(fraction, fraction, left, top, width, height)
+        value = minimum + fraction * span
+        ticks.extend([
+            f'<path d="M {x:.2f} {bottom} v 6 M {left} {y:.2f} h -6" stroke="#334155"/>',
+            f'<text x="{x:.2f}" y="{bottom + 22}" text-anchor="middle">{value:.2g}</text>',
+            f'<text x="{left - 12}" y="{y + 4:.2f}" text-anchor="end">{fraction:.1f}</text>',
+        ])
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="820" height="600" viewBox="0 0 820 600">
+  <rect width="100%" height="100%" fill="white"/>
+  <g font-family="Arial, sans-serif" font-size="12" fill="#334155">
+    <text x="410" y="30" text-anchor="middle" font-size="21">{result['backend']} FAR / FRR</text>
+    <text x="410" y="55" text-anchor="middle" font-size="14">EER={result['EER']:.6f}; threshold={result['EER_threshold']:.6f} (linear interpolation)</text>
+    <text x="290" y="79" fill="#2563eb">FAR (FPR)</text>
+    <text x="460" y="79" fill="#dc2626">FRR (1 - TPR)</text>
+    <rect x="{left}" y="{top}" width="{width}" height="{height}" fill="#f8fafc" stroke="#334155"/>
+    {' '.join(ticks)}
+    <polyline id="far-curve" points="{far_points}" fill="none" stroke="#2563eb" stroke-width="2.5"/>
+    <polyline id="frr-curve" points="{frr_points}" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+    <path d="M {eer_x:.2f} {top} V {bottom} M {left} {eer_y:.2f} H {left + width}" stroke="#7c3aed" stroke-dasharray="5 5"/>
+    <circle id="eer-point" cx="{eer_x:.2f}" cy="{eer_y:.2f}" r="5" fill="#7c3aed"/>
+    <text x="{min(eer_x + 9, left + width - 34):.2f}" y="{max(top + 16, eer_y - 10):.2f}" fill="#7c3aed">EER</text>
+    <text x="{left + width / 2}" y="{bottom + 54}" text-anchor="middle" font-size="15">Threshold (positive score &gt;= threshold)</text>
+    <text x="24" y="{top + height / 2}" text-anchor="middle" font-size="15" transform="rotate(-90 24 {top + height / 2})">Error rate</text>
+  </g>
+</svg>
+'''
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(svg, encoding="utf-8")
+
+
 def write_roc_files(output_dir: Path, results: list[dict[str, Any]]) -> None:
-    """输出每个后端的独立 ROC 曲线和一张汇总 ROC 曲线。"""
+    """输出每个后端的 ROC、阈值 FAR/FRR 曲线及汇总 ROC 曲线。"""
     roc_dir = output_dir / "roc_curves"
     for result in results:
         write_single_roc_svg(roc_dir / f"{result['backend']}.svg", result)
+        write_threshold_error_svg(
+            output_dir / "threshold_curves" / f"{result['backend']}.svg", result,
+        )
     write_combined_roc_svg(output_dir / "roc_curves_combined.svg", results)
 
 
@@ -523,7 +680,7 @@ def main() -> None:
         raise ValueError("data-dir、output-dir、embedding checkpoint 都不能为空。")
 
     train_dir = data_dir / "train"
-    test_dir = data_dir / "test"
+    test_dir = resolve_project_path(args.test_dir) or data_dir / "test"
     device = resolve_device(args.device)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -539,15 +696,19 @@ def main() -> None:
     print(f"embedding checkpoint：{embedding_model_path}")
 
     cache_tag = "all" if args.max_files_per_split is None else f"max{args.max_files_per_split}"
+    train_cache = resolve_project_path(args.train_feature_cache)
+    if train_cache is not None and not train_cache.exists() and not args.recompute_train_features:
+        raise FileNotFoundError(f"指定的训练特征缓存不存在：{train_cache}")
+    train_cache = train_cache or output_dir / "features" / f"train_features_{cache_tag}.npz"
     extractor = BEATsFeatureExtractor(model_path=embedding_model_path, device=str(device), pooling="mean")
     train_features, train_labels, _ = extract_split_features(
         extractor,
         "train",
         train_dir,
-        output_dir / "features" / f"train_features_{cache_tag}.npz",
+        train_cache,
         args.extract_batch_size,
         args.max_files_per_split,
-        args.recompute_features,
+        args.recompute_train_features,
     )
     test_features, test_labels, test_path_strings = extract_split_features(
         extractor,
@@ -556,7 +717,7 @@ def main() -> None:
         output_dir / "features" / f"test_features_{cache_tag}.npz",
         args.extract_batch_size,
         args.max_files_per_split,
-        args.recompute_features,
+        args.recompute_features or args.test_dir is not None,
     )
     del extractor
     if torch.cuda.is_available():
@@ -592,6 +753,7 @@ def main() -> None:
     print(f"指标 Markdown：{output_dir / 'metrics.md'}")
     print(f"独立 ROC 曲线目录：{output_dir / 'roc_curves'}")
     print(f"汇总 ROC 曲线：{output_dir / 'roc_curves_combined.svg'}")
+    print(f"阈值 FAR/FRR 曲线目录：{output_dir / 'threshold_curves'}")
 
 
 if __name__ == "__main__":

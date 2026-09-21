@@ -1,6 +1,6 @@
 # 分类器后端评估脚本使用说明
 
-本文对应 [scripts/evaluate_classifier_backends.py](../scripts/evaluate_classifier_backends.py)，用于在同一测试集上比较 BEATs 原生分类头与三个特征分类器，输出指标、逐样本预测和 ROC 曲线。
+本文对应 [scripts/evaluate_classifier_backends.py](../scripts/evaluate_classifier_backends.py)，用于在同一测试集上比较 BEATs 原生分类头与三个特征分类器，输出指标、逐样本预测、ROC 曲线和标记 EER 阈值的 FAR/FRR 曲线。
 
 ## 1. 快速开始
 
@@ -102,16 +102,19 @@ data_ready/
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `--data-dir` | `data_ready` | 包含 `train`、`test` 的数据根目录 |
-| `--output-dir` | `artifacts/classifier_backend_evaluation` | 指标、预测、ROC 和特征缓存的输出目录 |
-| `--native-checkpoint` | `logs/mimii_pump_baseline/version_1/checkpoints/last.ckpt` | 原生分类头的训练检查点；不会自动切换到新实验 |
+| `--output-dir` | `artifacts/classifier_backend_evaluation` | 指标、预测、曲线和默认特征缓存的输出目录 |
+| `--test-dir` | 未指定，使用 `data-dir/test` | 新测试集目录，直接包含类别子目录；指定后只重算测试集特征 |
+| `--train-feature-cache` | 未指定，使用当前输出目录的训练缓存 | 指向先前的训练特征 NPZ，支持更换输出目录时复用；文件必须存在，除非同时显式要求重算训练特征 |
+| `--native-checkpoint` | `logs/pump_pw_7fa13_finetune/version_3/checkpoints/last.ckpt` | 原生分类头的训练检查点；不会自动切换到新实验 |
 | `--embedding-model-path` | 未指定，复用原生检查点 | 特征提取模型路径 |
-| `--device` | `auto` | `auto`：CUDA 可用则使用 CUDA，否则使用 CPU；也可指定 `cpu`、`cuda`、`cuda:0` 等 |
+| `--device` | `cuda` | `auto`：CUDA 可用则使用 CUDA，否则使用 CPU；也可指定 `cpu`、`cuda`、`cuda:0` 等 |
 | `--extract-batch-size` | `16` | 特征提取批量，正整数；显存不足时减小 |
 | `--native-batch-size` | `16` | 原生分类头推理批量，正整数；显存不足时减小 |
 | `--positive-label` | `abnormal` | 正类名称，用于 Recall、F1、AUC/pAUC 和正类分数输出 |
 | `--pauc-max-fpr` | `0.1` | 标准化 pAUC 的最大假阳性率，范围为 `(0, 1]` |
 | `--max-files-per-split` | 未限制 | 每个划分只取排序后的前 N 个文件，N 为正整数；不是每类 N 个，也不是随机或分层抽样 |
-| `--recompute-features` | 关闭 | 忽略已有特征缓存，重新提取并覆盖对应缓存文件 |
+| `--recompute-features`、`--recompute-test-features` | 关闭 | 仅重新提取测试特征；旧参数现在不再强制重算训练集 |
+| `--recompute-train-features` | 关闭 | 显式重新提取训练特征，覆盖选定的训练缓存 |
 | `--skip-native` | 关闭 | 跳过原生分类头，仍提取特征并拟合、评估全部三个特征分类器 |
 | `-h`、`--help` | — | 显示帮助并退出，不启动评估 |
 
@@ -197,6 +200,8 @@ artifacts/classifier_backend_evaluation/
 │   ├── local-density-knn.svg
 │   ├── relative-mahalanobis.svg
 │   └── gmm-cosine-knn.svg
+├── threshold_curves/
+│   └── <backend>.svg
 └── features/
     ├── train_features_all.npz
     └── test_features_all.npz
@@ -204,12 +209,13 @@ artifacts/classifier_backend_evaluation/
 
 | 文件 | 内容 |
 | --- | --- |
-| `metrics.csv` | 各后端的 `backend, accuracy, recall, f1, AUC, pAUC`，数值保留六位小数 |
+| `metrics.csv` | 各后端的 `backend, accuracy, recall, f1, AUC, pAUC, EER, EER_threshold`，数值保留六位小数 |
 | `metrics.md` | 指标表格，以及正类标签、pAUC 最大 FPR |
-| `metrics.json` | 正类、pAUC 范围及各后端完整结果，包含预测、正类分数、FPR、TPR、阈值数组 |
+| `metrics.json` | 正类、pAUC 范围及各后端完整结果，包含预测、正类分数、FPR、TPR、ROC 阈值数组，以及 `error_thresholds`、`far`、`frr`、`EER`、`EER_threshold` |
 | `test_predictions.csv` | 每条测试音频的 `path`、真实 `label`，以及各后端的 `<backend>_prediction` 和 `<backend>_score` |
 | `roc_curves_combined.svg` | 所有参与评估的后端的 ROC 对比图 |
-| `roc_curves/<backend>.svg` | 单个后端的 ROC 曲线 |
+| `roc_curves/<backend>.svg` | 单个后端的 ROC 曲线，两轴刻度为 0.0～1.0、间隔 0.1 |
+| `threshold_curves/<backend>.svg` | 阈值–FAR/FRR 曲线，以紫色交点和辅助线标记插值 EER 及阈值 |
 | `features/*.npz` | 特征矩阵 `features`、类别 `labels` 和音频路径 `paths` |
 
 `--skip-native` 不会生成本次运行的原生分类头结果。使用 `--max-files-per-split N` 后，缓存文件名改为 `train_features_maxN.npz` 和 `test_features_maxN.npz`，其中 `N` 替换为实际数值。
@@ -220,6 +226,8 @@ artifacts/classifier_backend_evaluation/
 | Recall | 指定正类的召回率 |
 | F1 | 指定正类的精确率与召回率的调和平均，不是宏平均 F1 |
 | AUC | 基于正类分数计算的完整 ROC 曲线下面积 |
+| EER | FAR 与 FRR 相等处的线性插值错误率 |
+| EER_threshold | 插值 EER 交点对应的正类分数阈值 |
 | pAUC | FPR 从 0 到 `--pauc-max-fpr` 范围内的**标准化**局部 AUC |
 
 pAUC 使用 `roc_auc_score(..., max_fpr=...)` 的标准化计算，随机区分水平对应约 0.5，理想区分为 1；最大 FPR 为 1 时等于完整 AUC。比较 pAUC 时应使用相同的最大 FPR。
@@ -229,24 +237,45 @@ ROC/AUC 使用原生头的正类 softmax 概率，或特征分类器返回的正
 
 ## 7. 特征缓存和重复评估
 
-脚本默认复用同一输出目录中已有的特征缓存。缓存名称只区分 `train/test` 和 `all/maxN`，**不会校验模型路径、权重内容、数据目录、音频内容、类别或预处理是否变化**。
+训练集和测试集使用独立的重算开关。已有训练缓存默认直接复用；没有训练缓存时才提取训练特征。`--recompute-features`（别名 `--recompute-test-features`）现在**只重算测试集**，训练集必须显式使用 `--recompute-train-features` 才强制重算。
 
-- 同一模型和数据下重复评估，可复用缓存。
-- 更换检查点、替换数据或修改预处理后，应使用新的输出目录，或追加 `--recompute-features`。
-- 即使命中缓存，脚本仍会先初始化特征提取器，因此有效模型文件和运行依赖仍然必需。
-- 缓存只包含音频特征；三个分类器每次重新拟合，原生分类头也会重新推理。
-- 同一输出目录中的指标和逐样本预测会被覆盖；旧的、不参与本次运行的 ROC 文件不会自动删除。
+### 更换测试集，复用原训练特征
 
-例如，在更换权重后重新计算特征：
+新测试目录直接包含 `abnormal/`、`normal/` 等类别子目录，`--data-dir` 仍指向原训练集所在的数据根目录。`--test-dir` 同时作用于原生分类器推理和特征分类器评估，并自动重算测试特征，防止读取原测试集缓存。
+
+同一输出目录下运行：
 
 ```powershell
 python scripts/evaluate_classifier_backends.py `
-  --native-checkpoint "logs/mimii_pump_finetune/version_0/checkpoints/last.ckpt" `
-  --output-dir artifacts/evaluation_finetune_last `
-  --recompute-features
+  --data-dir data_ready `
+  --test-dir data_new/test `
+  --output-dir artifacts/classifier_backend_evaluation_fresh
 ```
 
-对比多次实验时，分别使用 `evaluation_baseline`、`evaluation_finetune_epoch02`、`evaluation_finetune_last` 等输出目录，便于保存各次结果和对应缓存。
+若要将新测试集结果保存到新目录，显式指定之前的训练缓存：
+
+```powershell
+python scripts/evaluate_classifier_backends.py `
+  --data-dir data_ready `
+  --test-dir data_new/test `
+  --train-feature-cache artifacts/classifier_backend_evaluation_fresh/features/train_features_all.npz `
+  --output-dir artifacts/evaluation_new_test
+```
+
+以上命令复用默认模型；如果原缓存使用了其他模型，必须补充与原运行一致的 `--native-checkpoint` 或 `--embedding-model-path`。`--max-files-per-split` 也应与原训练缓存一致。
+
+- 同一模型和训练数据下重复评估，不需要重算训练特征。缓存只包含音频特征；三个分类器每次重新拟合，原生分类头也会重新推理。
+- 默认缓存仍位于输出目录的 `features/` 中，名称区分 `train/test` 和 `all/maxN`；不会校验模型、音频内容或预处理变化。指定训练缓存时，需保证模型、训练样本、标签与提取设置一致。
+- 在原路径替换测试音频时，追加 `--recompute-test-features`；通过 `--test-dir` 指定测试集时已自动重算。
+- 更换特征模型或训练数据后，用 `--recompute-train-features --recompute-test-features` 同时更新两份特征。若同时指定 `--train-feature-cache`，将覆盖该路径的训练缓存。
+- 即使命中缓存，脚本仍会初始化特征提取器，因此有效模型文件和运行依赖仍然必需。
+- 同一输出目录中的指标、预测和同名曲线会被覆盖；旧的、不参与本次运行的曲线不会自动删除。
+
+### FAR/FRR 与 EER 口径
+
+以“正类分数 **大于等于** 阈值”作为判为正类的规则，FAR=FPR（负类误判为正类的比例），FRR=1−TPR（正类误判为负类的比例）。默认正类为 `abnormal`，此时 FAR 表示正常样本误报率，FRR 表示异常样本漏报率。
+
+曲线保留每个不同分数对应的阈值，并包含高于最高分的全拒绝端点。EER 和对应阈值通过相邻阈值的 FAR/FRR 线性插值计算，图中注明 `linear interpolation`。对于重复分数或离散样本，插值交点是估计值，实际按单个阈值分类不一定恰好满足 FAR=FRR。该值描述当前测试集，不会改变原有预测标签或 Accuracy/Recall/F1 的计算规则。
 
 ## 8. 常见问题
 
@@ -258,7 +287,7 @@ python scripts/evaluate_classifier_backends.py `
 | 加载模型出现 `size mismatch` | 检查模型配置与权重结构是否匹配。当前特征提取器从 Lightning 配置重建模型时将 `embed_dim` 固定为 512；从零训练修改过该值时需先适配特征提取器 |
 | 提示只支持二分类或无法定位正类 | 确认目录中只有目标的两个类别，且 `--positive-label` 与文件夹名称一致 |
 | AUC/pAUC 报错或出现 NaN | 检查测试集是否同时含两类，特别是设置样本上限后；也应确认训练集同时含两类 |
-| 更换模型后结果没有变化 | 检查是否复用了旧特征缓存，换输出目录或追加 `--recompute-features` |
+| 更换模型后结果没有变化 | 检查是否复用了旧特征缓存，更换输出目录且不引用旧缓存，或同时追加 `--recompute-train-features --recompute-test-features` |
 | CUDA 不可用或显存不足 | 无 CUDA 时改用 `--device cpu`；显存不足时减小两个批量，或先对长音频切片 |
 | 找不到音频 | 检查 `train/类别/音频`、`test/类别/音频` 的层级、扩展名和路径，类别目录下更深层的文件不会被扫描 |
 | 只有三行指标或出现旧 ROC 图 | 检查是否跳过了原生分类头；确认使用独立输出目录，旧 ROC 文件不会自动清理 |
