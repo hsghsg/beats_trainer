@@ -1,0 +1,67 @@
+# 输入来源和分段策略
+input:
+  mode: file                      # file：WAV 文件或目录；websocket：接收 PCM
+  path: audio                     # WAV 文件或目录，相对 infer.yaml 所在目录解析
+  recursive: true                 # 是否递归查找目录中的 WAV 文件
+  duration_seconds: 10            # 每次推理固定使用 10 秒音频
+  sample_rate: 16000              # BEATs 目标采样率，固定 16000 Hz
+  tail_policy: pad                # 不足 10 秒的尾段：pad 补零、drop 丢弃、error 报错
+  websocket:                      # WebSocket 客户端配置
+    url: ws://localhost:8765/pcmData  # PCM 数据服务地址
+    request: null                 # 连接后发送的文本请求；null 表示服务端主动推送
+    request_each_window: false    # true：每输出一个窗口后再次发送 request
+    sample_rate: 16000            # 服务端 PCM 原始采样率
+    channels: 1                   # PCM 声道数，多声道交错排列并取均值
+    format: s16le                 # s16le：有符号 16 位小端；f32le：32 位浮点小端
+    timeout_seconds: 30           # 建连及单次接收超时秒数
+    max_message_bytes: 4194304    # 单条 WebSocket 消息最大字节数
+    max_windows: 0                # 最大窗口数，0 表示持续接收直至服务端关闭
+
+# 时频前处理，必须与后端训练时一致
+frontend:
+  method: log-mel-energy          # log-mel-energy 或 wavelet（项目 CWT 幅值算法）
+  fbank_mean: 15.41663            # BEATs 特征均值，归一化公式为 (特征-均值)/(2*标准差)
+  fbank_std: 6.55582              # BEATs 特征标准差，必须大于零
+  cwt_voices_per_octave: 12       # 小波每倍频程尺度数，与训练保持一致
+  cwt_time_stride: 1              # 时间抽样步长；原项目为 1，变更后须匹配训练后端
+  max_tokens: 4096                # 最大 Transformer token 数，超出时报错，防止内存耗尽
+
+# BEATs 特征模型
+embedding:
+  checkpoint: models/beats.ckpt   # Lightning .ckpt 或 BEATs .pt，不会联网下载
+  backbone_overrides: {}          # 特殊 BEATs 架构参数覆盖，默认沿用项目配置
+  device: auto                    # auto、cpu、cuda 或 cuda:0
+  normalize: true                 # embedding 后端是否 L2 归一化，项目默认 true
+  num_threads: 4                  # PyTorch CPU 线程数
+
+# 每个后端独立判断异常
+classifiers:
+  beats-native:                   # BEATs 原生线性或 MLP 分类头
+    enabled: true                 # 是否参与投票
+    checkpoint: models/beats.ckpt # 分类头 checkpoint，可与 embedding 共用
+    labels: [abnormal, normal]    # 分类头输出列的训练标签顺序，务必核对
+    threshold: 0.5                # 异常类 softmax 概率不低于此值时判异常
+  local-density-knn:              # 局部密度 KNN
+    enabled: true                 # 是否参与投票
+    path: models/local-density-knn.pkl  # 已训练的分类器文件
+    threshold: 0.5                # 异常类归一化分数阈值
+  relative-mahalanobis:           # 相对马氏距离
+    enabled: true                 # 是否参与投票
+    path: models/relative-mahalanobis.pkl  # 已训练的分类器文件
+    threshold: 0.5                # 异常类归一化分数阈值
+  gmm-cosine-knn:                 # GMM 与余弦 KNN 混合分类器
+    enabled: true                 # 是否参与投票
+    path: models/gmm-cosine-knn.pkl  # 已训练的分类器文件
+    threshold: 0.5                # 异常类归一化分数阈值
+
+# 联合判断规则
+ensemble:
+  min_anomalous: 2                # 至少 m 个启用分类器判异常才输出异常
+  normal_label: normal            # 正常类别名称
+  abnormal_label: abnormal        # 异常类别名称，须存在于每个分类器标签中
+
+# 结果及日志
+output:
+  jsonl_path: output/results.jsonl  # 逐窗口追加 Result；null 表示仅终端输出
+  log_path: output/infer.log      # UTF-8 中文日志；null 表示仅终端日志
+  log_level: INFO                 # DEBUG、INFO、WARNING 或 ERROR

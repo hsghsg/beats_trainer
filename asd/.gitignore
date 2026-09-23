@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+output/
+models/*
+!models/README.md
+.test-deps/
+audio/

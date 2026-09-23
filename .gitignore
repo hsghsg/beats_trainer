@@ -199,3 +199,12 @@ notebooks/ESC50_organized/
 /checkpoints
 .secrets
 logs/
+dataset/MIMII
+/data_ready
+/ESC-50-master
+/artifacts
+/.idea
+/dataset/ESC-50-master
+/external_project
+/dataset
+/outputs
