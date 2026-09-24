@@ -68,6 +68,30 @@ python scripts/train_beats.py --config scripts/train_beats.yaml --mode finetune 
     audio_preprocess: cwt
     cwt_voices_per_octave: 12
 ```
+
+### 完整的小波微调实验
+
+项目提供独立配置 `scripts/train_beats_cwt.yaml`，使用 `data_ready` 的全部训练、
+验证、测试文件，以原始预训练权重开始全量微调。默认完整训练 1 轮，批量为 8，
+使用 BF16 混合精度，随后加载最佳检查点评估测试集。
+
+```bash
+python scripts/train_beats.py --config scripts/train_beats_cwt.yaml
+```
+
+该配置沿用 12 尺度/倍频程的 Morlet CWT，并设置：
+
+- `cwt_frame_hop: 160`：在 16 kHz 下对每 10 毫秒的 CWT 幅值取平均。
+  10 秒音频由 `[160000, 91]` 降为 `[1000, 91]`，避免逐采样点输入造成注意力显存过大。
+  聚合保留完整音频时长，末帧不足 160 个点时仅平均有效点。
+- `cwt_log_normalize: true`：幅值下限设为 `1e-8` 后取自然对数，使用该条音频
+  自身的均值和标准差归一化；不读取验证集或测试集的统计量。
+  模型识别该配置后跳过原有 log-mel 固定均值/方差归一化。
+
+这两个选项的默认值仍是 `1` 和 `false`，保持既有逐采样点 CWT 路径兼容。
+小波模型推理必须使用训练时相同的采样率、尺度数、聚合与归一化设置。
+单轮结果用于初次实验，不能据此宣称充分收敛或优于原始波形方案。
+
 ## Quick Start
 
 ### Fine-tuning (Recommended)

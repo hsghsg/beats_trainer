@@ -27,6 +27,8 @@ SMALL_MODEL = {
 def config_file(tmp_path):
     """将正式 YAML 复制到临时目录并替换资源路径，返回配置文件和可修改参数。"""
     values = yaml.safe_load(train_beats.DEFAULT_CONFIG.read_text(encoding="utf-8"))
+    values["mode"] = "head"
+    values["experiment_name"] = "mimii_pump"
     values["log_dir"] = "logs"
     values["data"].update(
         train_dir="train", val_dir="val", test_dir="test", num_workers=0

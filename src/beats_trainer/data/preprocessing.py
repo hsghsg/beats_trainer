@@ -34,6 +34,8 @@ class CWTAmplitudeTransform:
         save_visualization: bool = False,
         visualize_dir: Optional[str | Path] = None,
         max_visualize_count: int = 4,
+        frame_hop: int = 1,
+        log_normalize: bool = False,
     ):
         """初始化 CWT 前处理器。
 
@@ -43,6 +45,11 @@ class CWTAmplitudeTransform:
             save_visualization: 是否在前若干次调用中输出时频图图片。
             visualize_dir: 时频图图片输出目录。
             max_visualize_count: 最多保存多少张图片。
+            frame_hop: 每帧平均的采样点数，末尾不足一帧时仅平均有效点。
+            log_normalize: 是否对帧幅值取自然对数并按单条音频标准化。
+
+        Raises:
+            ValueError: frame_hop 不是正整数或 log_normalize 不是布尔值。
         """
         self.sample_rate = float(sample_rate)
         self.voices_per_octave = int(voices_per_octave)
@@ -52,6 +59,12 @@ class CWTAmplitudeTransform:
             max_visualize_count = 0
         self.max_visualize_count = max_visualize_count
         self._visualized_count = 0
+        if type(frame_hop) is not int or frame_hop < 1:
+            raise ValueError("CWT 帧步长必须为正整数")
+        if type(log_normalize) is not bool:
+            raise ValueError("CWT 对数标准化开关必须为布尔值")
+        self.frame_hop = frame_hop
+        self.log_normalize = log_normalize
 
     def __call__(self, waveform: torch.Tensor) -> torch.Tensor:
         """将 1D 波形张量转换为 2D 幅值时频图。
@@ -66,6 +79,9 @@ class CWTAmplitudeTransform:
 
         signal = waveform.detach().to(dtype=torch.float64, device="cpu").numpy()
         result = self._compute_cwtamplitude(signal)
+        if self.log_normalize and result.size:
+            result = np.log(np.maximum(result, 1e-8))
+            result = (result - result.mean()) / max(float(result.std()), 1e-6)
         cwt = torch.from_numpy(result).to(dtype=torch.float32, device=waveform.device)
         if self.save_visualization:
             self._save_visualization_if_needed(cwt)
@@ -95,7 +111,7 @@ class CWTAmplitudeTransform:
 
         Returns:
             已保存图片的绝对路径。横轴为秒，纵轴为 Morlet 中心频率
-            6 / (2 * pi * scale) 对应的近似频率，颜色为未取对数的幅值。
+            6 / (2 * pi * scale) 对应的近似频率；颜色由 log_normalize 决定。
 
         Raises:
             ValueError: 矩阵维度、尺度数量或输出扩展名不符合要求。
@@ -116,7 +132,7 @@ class CWTAmplitudeTransform:
             np.arange(scale_count) / self.voices_per_octave
         )
         frequencies = 6.0 / (2.0 * np.pi * scales)
-        times = np.arange(cwt.shape[0]) / self.sample_rate
+        times = np.arange(cwt.shape[0]) * self.frame_hop / self.sample_rate
         data = cwt.detach().cpu().numpy().T
         figure = Figure(figsize=(10, 4), layout="constrained")
         FigureCanvasAgg(figure)
@@ -128,8 +144,9 @@ class CWTAmplitudeTransform:
             axes.set_yscale("log")
             axes.set_xlabel("Time (s)")
             axes.set_ylabel("Approx. frequency (Hz)")
-            axes.set_title("CWT amplitude spectrogram")
-            figure.colorbar(plot, ax=axes, label="Amplitude")
+            axes.set_title("CWT spectrogram")
+            color_label = "Normalized log amplitude" if self.log_normalize else "Amplitude"
+            figure.colorbar(plot, ax=axes, label=color_label)
             output_file.parent.mkdir(parents=True, exist_ok=True)
             figure.savefig(output_file, dpi=160)
         finally:
@@ -146,7 +163,8 @@ class CWTAmplitudeTransform:
         2) 补零到 2 的幂、
         3) 构建 omega 频率轴、
         4) 每个尺度执行 FFT 频域卷积与 IFFT，
-        5) 输出前半段复数系数幅值。
+        5) 保留原始信号长度的复数系数幅值，按 frame_hop 做不重叠帧平均。
+        返回 [ceil(采样点数 / frame_hop), 尺度数]；空信号返回空矩阵。
         """
         signal = np.asarray(signal, dtype=np.float64)
         sample_count = int(signal.size)
@@ -187,8 +205,10 @@ class CWTAmplitudeTransform:
         spectrum = np.fft.fft(x)
 
         scale_num = len(scales)
-        output_time = sample_count
+        output_time = (sample_count + self.frame_hop - 1) // self.frame_hop
         result = np.zeros((scale_num, output_time), dtype=np.float64)
+        frame_starts = np.arange(0, sample_count, self.frame_hop)
+        frame_lengths = np.minimum(self.frame_hop, sample_count - frame_starts)
 
         stp_frq = omega[1]
         cfs_norm = math.sqrt(stp_frq) * math.sqrt(omega.size)
@@ -199,7 +219,11 @@ class CWTAmplitudeTransform:
             p = (scale * omega) - 6.0
             t = mul * np.sqrt(scale) * np.exp(-(p * p) / 2.0)
             coeff = np.fft.ifft(spectrum * t)
-            result[row] = np.abs(coeff[:output_time]) / scale_normalizer
+            amplitude = np.abs(coeff[:sample_count]) / scale_normalizer
+            if self.frame_hop == 1:
+                result[row] = amplitude
+            else:
+                result[row] = np.add.reduceat(amplitude, frame_starts) / frame_lengths
 
         # C# 的 result 是 [scale, time]，转置为 [time, scale] 与 BEATs 习惯一致
         return result.T
@@ -225,6 +249,8 @@ def create_audio_preprocessor(
         return CWTAmplitudeTransform(
             sample_rate=config.sample_rate,
             voices_per_octave=config.cwt_voices_per_octave,
+            frame_hop=config.cwt_frame_hop,
+            log_normalize=config.cwt_log_normalize,
         )
 
     raise ValueError(f"不支持的音频前处理方式：{method}")

@@ -269,9 +269,25 @@ class BEATsLightningModule(pl.LightningModule):
             self.classifier = nn.Linear(input_dim, self.num_classes)
 
     def forward(self, x, padding_mask=None):
-        """Forward pass."""
+        """提取输入特征并平均池化分类；已标准化的 CWT 特征跳过 fbank 固定归一化。
+
+        Args:
+            x: [batch, samples] 波形或 [batch, time, frequency] 小波特征。
+            padding_mask: 可选的布尔时间掩码，True 表示补齐部分。
+
+        Returns:
+            [batch, num_classes] 分类 logits，供交叉熵训练或 softmax 推理。
+        """
         # Extract features from BEATs
-        if padding_mask is not None:
+        if (
+            x.ndim == 3
+            and self.config.data.audio_preprocess.strip().lower() == "cwt"
+            and self.config.data.cwt_log_normalize
+        ):
+            features, _ = self.backbone.extract_features(
+                x, padding_mask, fbank_mean=0.0, fbank_std=0.5
+            )
+        elif padding_mask is not None:
             features, _ = self.backbone.extract_features(x, padding_mask)
         else:
             features, _ = self.backbone.extract_features(x)

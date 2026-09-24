@@ -27,6 +27,8 @@ class DataConfig:
     )
     audio_preprocess: str = "waveform"
     cwt_voices_per_octave: int = 12
+    cwt_frame_hop: int = 1  # 每帧聚合的采样点数；1 保留逐采样点幅值
+    cwt_log_normalize: bool = False  # 对数幅值按单条音频标准化
 
     # Data splits
     train_split: float = 0.8

@@ -30,7 +30,10 @@ MODE_NAMES = {
 }
 MODE_FIELDS = {"train_from_scratch", "freeze_backbone", "fine_tune_backbone"}
 SECTION_FIELDS = {
-    "data": {"sample_rate", "batch_size", "num_workers", "audio_preprocess", "cwt_voices_per_octave"},
+    "data": {
+        "sample_rate", "batch_size", "num_workers", "audio_preprocess",
+        "cwt_voices_per_octave", "cwt_frame_hop", "cwt_log_normalize",
+    },
     "model": {item.name for item in fields(ModelConfig)}
     - MODE_FIELDS
     - {"num_classes"},
@@ -109,6 +112,10 @@ def validate_config(config: Config) -> None:
         raise ValueError("data.audio_preprocess 仅支持 waveform、raw 或 cwt")
     if type(config.data.cwt_voices_per_octave) is not int or config.data.cwt_voices_per_octave < 1:
         raise ValueError("data.cwt_voices_per_octave 必须为正整数")
+    if type(config.data.cwt_frame_hop) is not int or config.data.cwt_frame_hop < 1:
+        raise ValueError("data.cwt_frame_hop 必须为正整数")
+    if type(config.data.cwt_log_normalize) is not bool:
+        raise ValueError("data.cwt_log_normalize 必须为 true 或 false")
 
     for name in ("learning_rate", "weight_decay"):
         value = getattr(config.training, name)

@@ -47,11 +47,12 @@ def scan_directory_dataset(
 
     for class_dir in class_dirs:
         class_name = class_dir.name
-        audio_files = []
-
-        for ext in audio_extensions:
-            audio_files.extend(class_dir.glob(f"*{ext}"))
-            audio_files.extend(class_dir.glob(f"*{ext.upper()}"))
+        # 按扩展名统一匹配一次，避免 Windows 大小写不敏感导致重复样本。
+        extensions = {ext.lower() for ext in audio_extensions}
+        audio_files = sorted(
+            path for path in class_dir.iterdir()
+            if path.is_file() and path.suffix.lower() in extensions
+        )
 
         if not audio_files:
             warnings.warn(f"No audio files found in {class_dir}")

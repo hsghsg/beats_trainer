@@ -1,0 +1,37 @@
+# 使用现有数据集完成一次 CWT 前处理的 BEATs 全量微调及测试。
+# 启动：python scripts/train_beats.py --config scripts/train_beats_cwt.yaml
+mode: finetune
+experiment_name: pump_pw_7fa13_cwt_20260924
+log_dir: ../logs
+test_after_training: true
+resume_from_checkpoint: null
+
+data:
+  train_dir: ../data_ready/train
+  val_dir: ../data_ready/val
+  test_dir: ../data_ready/test
+  sample_rate: 16000
+  batch_size: 8
+  num_workers: 4
+  audio_preprocess: cwt
+  cwt_voices_per_octave: 12
+  cwt_frame_hop: 160  # 每 160 个采样点平均幅值，即 10 毫秒一帧
+  cwt_log_normalize: true  # 对数幅值按单条音频标准化，不使用测试集统计量
+
+model:
+  model_path: ../checkpoints/BEATs_iter3_plus_AS2M.pt
+  dropout_rate: 0.1
+  use_custom_head: false
+
+training:
+  gpus: 1
+  precision: bf16-mixed
+  optimizer: adamw
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+  max_epochs: 1  # 完整遍历训练集一次，之后执行验证及测试
+  patience: 10
+  scheduler: cosine
+  monitor_metric: val_accuracy
+  log_every_n_steps: 25
+  save_top_k: 1
