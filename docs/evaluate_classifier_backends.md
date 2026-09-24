@@ -9,10 +9,19 @@
 ```powershell
 cd C:\hsg\beats_trainer
 
-$ckpt = "logs/mimii_pump_finetune/version_0/checkpoints/mimii_pump_finetune-epoch=02-val_accuracy=0.989.ckpt"
+$ckpt = "logs\pump_pw_7fa13_finetune\version_3\checkpoints\last.ckpt"
+
+# 首次训练并保存三个后端；以后更换测试集时无需重复执行。
+python scripts/train_mimii_embedding_classifier.py `
+  --data-dir data_ready `
+  --model-path "$ckpt" `
+  --classifier all `
+  --device auto `
+  --output-dir artifacts/classifiers_finetune_epoch02
 
 python scripts/evaluate_classifier_backends.py `
   --data-dir data_ready `
+  --classifier-dir artifacts/classifiers_finetune_epoch02 `
   --native-checkpoint "$ckpt" `
   --device auto `
   --extract-batch-size 4 `
@@ -38,19 +47,21 @@ python scripts/evaluate_classifier_backends.py --help
 | 输出中的 backend | 分类方式 | 本次运行的行为 |
 | --- | --- | --- |
 | `beats-native-checkpoint` | 检查点中保存的原生分类头，可为线性头或训练时配置的多层头 | 加载已训练参数，直接在测试集上推理 |
-| `local-density-knn` | 局部密度加权 KNN | 使用训练集特征拟合后，评估测试集 |
-| `relative-mahalanobis` | 相对马氏距离分类器 | 使用训练集特征估计统计量后，评估测试集 |
-| `gmm-cosine-knn` | GMM 与余弦 KNN 混合分类器 | 使用训练集特征拟合后，评估测试集 |
+| `local-density-knn` | 局部密度加权 KNN | 加载已拟合的 `.pkl`，直接评估测试集 |
+| `relative-mahalanobis` | 相对马氏距离分类器 | 加载 `.pkl` 中已估计的统计量，直接评估测试集 |
+| `gmm-cosine-knn` | GMM 与余弦 KNN 混合分类器 | 加载已拟合的 `.pkl`，直接评估测试集 |
 
 脚本按以下顺序执行：
 
-1. 收集 `train`、`test` 中的音频和类别，确定正类标签。
-2. 使用 `--embedding-model-path` 指定的 BEATs 模型提取训练集和测试集特征；未指定时复用 `--native-checkpoint`。特征采用均值池化，已有缓存可直接读取。
-3. 未设置 `--skip-native` 且原生检查点存在时，评估检查点中保存的分类头。
-4. 分别拟合三个特征分类器，在测试集上计算指标并保存结果。
+1. 收集测试集音频和类别，确定正类标签；无需训练目录和训练特征缓存。
+2. 从 `--classifier-dir` 加载所选后端的 `.pkl`，检查分类器类型、拟合状态及类别。模型缺失时直接报错并提示训练命令，不会自动训练。
+3. 使用 `--embedding-model-path` 指定的 BEATs 模型提取测试特征；未指定时复用 `--native-checkpoint`。特征采用均值池化，必须与训练分类器时使用的模型和特征提取设置一致。
+4. 未设置 `--skip-native` 且原生检查点存在时，评估检查点中保存的分类头。
+5. 使用已加载的后端直接预测测试集，计算指标并输出 ROC、FAR/FRR 曲线。
 
-BEATs 主干在评估过程中不进行梯度训练；三个特征分类器每次运行都会重新拟合。
-本脚本不读取已有分类器 `.pkl`，也不保存拟合后的 `.pkl`。如需保存分类器，使用 [train_mimii_embedding_classifier.py](../scripts/train_mimii_embedding_classifier.py)。
+评估过程不训练 BEATs，也不调用后端分类器的 `fit()`。训练由 [train_mimii_embedding_classifier.py](../scripts/train_mimii_embedding_classifier.py) 完成：`--classifier all` 一次训练三个后端并共享训练特征；仍可指定单个后端，默认是 `local-density-knn`。
+
+训练脚本在每个分类器拟合完成后立即保存 `<backend>.pkl`，再执行后续评估；即使后续验证集读取失败，模型文件仍保留。训练只使用 `train`；`val` 和 `test` 目录可选，存在时仅用于指标评估。以前该训练脚本保存的 `.pkl` 也可直接加载。
 
 `--device` 控制 BEATs 特征提取和原生分类头推理设备；三个特征分类器使用 NumPy/scikit-learn 在 CPU 上计算。
 
@@ -74,7 +85,7 @@ data_ready/
 
 - 当前指标流程用于**二分类**。训练集和测试集都应包含同样的两个类别；测试集需要同时包含正、负样本才能计算有效 AUC/pAUC。
 - 类别由文件夹名称确定，默认正类为 `abnormal`；其他命名需设置 `--positive-label`。
-- 只读取 `train` 和 `test`，不使用 `val`。本脚本输出的指标全部来自测试集。
+- 评估脚本只读取 `test` 或 `--test-dir`，不需要 `train`、`val`。上图中的 `train` 只供训练脚本使用。
 - 支持 `.wav`、`.mp3`、`.flac`、`.m4a`，扩展名匹配不区分大小写。
 - 只扫描类别目录的直接子文件，不递归读取更深层目录。
 - 原生推理和特征提取按 16 kHz 单声道读取音频。原生推理会将同批次音频补齐至最长长度；较长录音可先切片，并减小批量。
@@ -101,10 +112,11 @@ data_ready/
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--data-dir` | `data_ready` | 包含 `train`、`test` 的数据根目录 |
+| `--data-dir` | `data_ready` | 测试集所在的数据根目录，默认读取其 `test` 子目录 |
 | `--output-dir` | `artifacts/classifier_backend_evaluation` | 指标、预测、曲线和默认特征缓存的输出目录 |
 | `--test-dir` | 未指定，使用 `data-dir/test` | 新测试集目录，直接包含类别子目录；指定后只重算测试集特征 |
-| `--train-feature-cache` | 未指定，使用当前输出目录的训练缓存 | 指向先前的训练特征 NPZ，支持更换输出目录时复用；文件必须存在，除非同时显式要求重算训练特征 |
+| `--classifier-dir` | `artifacts/mimii_embedding_classifier` | 训练脚本输出的分类器目录，包含 `<backend>.pkl` |
+| `--classifiers` | 全部三个后端 | 空格分隔的后端名称；只训练过一个后端时，可仅指定该名称 |
 | `--native-checkpoint` | `logs/pump_pw_7fa13_finetune/version_3/checkpoints/last.ckpt` | 原生分类头的训练检查点；不会自动切换到新实验 |
 | `--embedding-model-path` | 未指定，复用原生检查点 | 特征提取模型路径 |
 | `--device` | `cuda` | `auto`：CUDA 可用则使用 CUDA，否则使用 CPU；也可指定 `cpu`、`cuda`、`cuda:0` 等 |
@@ -112,15 +124,14 @@ data_ready/
 | `--native-batch-size` | `16` | 原生分类头推理批量，正整数；显存不足时减小 |
 | `--positive-label` | `abnormal` | 正类名称，用于 Recall、F1、AUC/pAUC 和正类分数输出 |
 | `--pauc-max-fpr` | `0.1` | 标准化 pAUC 的最大假阳性率，范围为 `(0, 1]` |
-| `--max-files-per-split` | 未限制 | 每个划分只取排序后的前 N 个文件，N 为正整数；不是每类 N 个，也不是随机或分层抽样 |
-| `--recompute-features`、`--recompute-test-features` | 关闭 | 仅重新提取测试特征；旧参数现在不再强制重算训练集 |
-| `--recompute-train-features` | 关闭 | 显式重新提取训练特征，覆盖选定的训练缓存 |
-| `--skip-native` | 关闭 | 跳过原生分类头，仍提取特征并拟合、评估全部三个特征分类器 |
+| `--max-files-per-split` | 未限制 | 评估时只限制测试集，取排序后的前 N 个文件；不是每类 N 个，也不是随机或分层抽样 |
+| `--recompute-features`、`--recompute-test-features` | 关闭 | 仅重新提取测试特征，不训练或修改分类器 |
+| `--skip-native` | 关闭 | 跳过原生分类头，仍提取测试特征并评估所选已保存后端 |
 | `-h`、`--help` | — | 显示帮助并退出，不启动评估 |
 
-当前没有 `--classifier`、`--config`、`--dry-run` 或“仅评估原生分类头”的命令行选项。
+评估使用复数参数 `--classifiers`，训练使用单数参数 `--classifier`。评估没有 `--config`、`--dry-run` 或“仅评估原生分类头”选项。
 
-三个特征分类器的参数固定在脚本的 `build_embedding_classifiers()` 中：
+后端参数由训练脚本确定并随 `.pkl` 保存，评估时不会重新构造或覆盖参数。训练默认值如下：
 
 | 后端 | 当前参数 |
 | --- | --- |
@@ -128,9 +139,11 @@ data_ready/
 | 相对马氏距离 | `covariance_type="diag"`、`regularization=1e-4` |
 | GMM + 余弦 KNN | `n_components=4`、`knn_k=15`、`alpha=0.6`、`random_state=42` |
 
-这些参数暂不支持通过本脚本的命令行修改。需要单独选择特征分类器或调参时，可使用 `train_mimii_embedding_classifier.py --classifier ...`，其指标和输出格式与本脚本不同。
+调参后应在训练脚本中重新拟合并保存模型，评估脚本再通过 `--classifier-dir` 加载对应目录。
 
 ## 5. 常用运行方式
+
+以下示例均要求已用相同 BEATs 模型训练并保存后端。默认读取 `artifacts/mimii_embedding_classifier`；模型位于其他目录时追加 `--classifier-dir`。仅有一个模型时追加例如 `--classifiers local-density-knn`。
 
 ### 只评估三个特征分类器
 
@@ -176,11 +189,11 @@ python scripts/evaluate_classifier_backends.py `
   --output-dir artifacts/evaluation_fault_fpr005
 ```
 
-`data_fault_ready` 为自备数据目录。该示例只评估特征分类器；若加入原生分类头，应使用按 `fault`、`normal` 类别训练得到的检查点。
+`data_fault_ready` 为自备数据目录。该示例只评估特征分类器；已保存后端也必须按 `fault`、`normal` 类别训练；若加入原生分类头，同样需要按这两个类别训练得到的检查点。
 
 ### 小规模试跑
 
-可先准备一个同时包含两类训练和测试音频的小数据目录，再通过 `--data-dir` 指定。如果使用 `--max-files-per-split N`，需要确认排序后的前 N 个样本在两个划分中都包含两类。
+可先准备一个同时包含两类测试音频的小数据目录，再通过 `--test-dir` 指定。如果使用 `--max-files-per-split N`，需要确认测试集中排序后的前 N 个样本仍包含两类。
 
 例如，某个划分有 100 个 `abnormal` 和 100 个 `normal`，设置 `--max-files-per-split 64` 会只选到前一类，不能得到有效的二分类评估。正式比较时应取消该限制，使用完整且固定的测试集。
 
@@ -203,7 +216,6 @@ artifacts/classifier_backend_evaluation/
 ├── threshold_curves/
 │   └── <backend>.svg
 └── features/
-    ├── train_features_all.npz
     └── test_features_all.npz
 ```
 
@@ -218,7 +230,7 @@ artifacts/classifier_backend_evaluation/
 | `threshold_curves/<backend>.svg` | 阈值–FAR/FRR 曲线，以紫色交点和辅助线标记插值 EER 及阈值 |
 | `features/*.npz` | 特征矩阵 `features`、类别 `labels` 和音频路径 `paths` |
 
-`--skip-native` 不会生成本次运行的原生分类头结果。使用 `--max-files-per-split N` 后，缓存文件名改为 `train_features_maxN.npz` 和 `test_features_maxN.npz`，其中 `N` 替换为实际数值。
+`--skip-native` 不会生成本次运行的原生分类头结果。使用 `--max-files-per-split N` 后，测试缓存文件名改为 `test_features_maxN.npz`。分类器训练输出目录中的 `<backend>.pkl` 与评估结果目录独立。
 
 | 指标 | 含义 |
 | --- | --- |
@@ -235,40 +247,27 @@ pAUC 使用 `roc_auc_score(..., max_fpr=...)` 的标准化计算，随机区分�
 Accuracy、Recall、F1 来自各后端默认的类别预测规则。`--pauc-max-fpr` 只影响 pAUC 的积分范围，**不会调整分类阈值，也不表示默认预测的 FPR 已达到该值**。
 ROC/AUC 使用原生头的正类 softmax 概率，或特征分类器返回的正类概率/归一化分数。
 
-## 7. 特征缓存和重复评估
+## 7. 已保存分类器和重复评估
 
-训练集和测试集使用独立的重算开关。已有训练缓存默认直接复用；没有训练缓存时才提取训练特征。`--recompute-features`（别名 `--recompute-test-features`）现在**只重算测试集**，训练集必须显式使用 `--recompute-train-features` 才强制重算。
-
-### 更换测试集，复用原训练特征
-
-新测试目录直接包含 `abnormal/`、`normal/` 等类别子目录，`--data-dir` 仍指向原训练集所在的数据根目录。`--test-dir` 同时作用于原生分类器推理和特征分类器评估，并自动重算测试特征，防止读取原测试集缓存。
-
-同一输出目录下运行：
+更换测试集时，只需加载原来保存的分类器，无需原训练音频、训练特征缓存或重新拟合。示例沿用快速开始中训练好的三个后端：
 
 ```powershell
 python scripts/evaluate_classifier_backends.py `
-  --data-dir data_ready `
   --test-dir data_new/test `
-  --output-dir artifacts/classifier_backend_evaluation_fresh
-```
-
-若要将新测试集结果保存到新目录，显式指定之前的训练缓存：
-
-```powershell
-python scripts/evaluate_classifier_backends.py `
-  --data-dir data_ready `
-  --test-dir data_new/test `
-  --train-feature-cache artifacts/classifier_backend_evaluation_fresh/features/train_features_all.npz `
+  --classifier-dir artifacts/classifiers_finetune_epoch02 `
+  --native-checkpoint "$ckpt" `
+  --device auto `
   --output-dir artifacts/evaluation_new_test
 ```
 
-以上命令复用默认模型；如果原缓存使用了其他模型，必须补充与原运行一致的 `--native-checkpoint` 或 `--embedding-model-path`。`--max-files-per-split` 也应与原训练缓存一致。
+`$ckpt` 必须与训练时的模型一致。若后端使用的 BEATs 主干与原生分类头不同，显式传入训练时的 `--embedding-model-path`。
 
-- 同一模型和训练数据下重复评估，不需要重算训练特征。缓存只包含音频特征；三个分类器每次重新拟合，原生分类头也会重新推理。
-- 默认缓存仍位于输出目录的 `features/` 中，名称区分 `train/test` 和 `all/maxN`；不会校验模型、音频内容或预处理变化。指定训练缓存时，需保证模型、训练样本、标签与提取设置一致。
-- 在原路径替换测试音频时，追加 `--recompute-test-features`；通过 `--test-dir` 指定测试集时已自动重算。
-- 更换特征模型或训练数据后，用 `--recompute-train-features --recompute-test-features` 同时更新两份特征。若同时指定 `--train-feature-cache`，将覆盖该路径的训练缓存。
-- 即使命中缓存，脚本仍会初始化特征提取器，因此有效模型文件和运行依赖仍然必需。
+- `--test-dir` 同时作用于原生推理和后端评估，并强制更新测试特征，防止复用原测试集缓存。
+- 默认测试缓存位于输出目录的 `features/test_features_all.npz`，或限制样本数时的 `test_features_maxN.npz`。在原路径替换音频后应追加 `--recompute-test-features`。
+- 分类器加载会校验类型、拟合状态和类别；不会校验训练时的 BEATs 权重或预处理设置，必须由调用方保持一致。
+- 更换训练数据、BEATs 模型或后端参数后，应重新运行训练脚本；更换特征模型时，训练端加 `--recompute-features`，评估端也更新测试特征。
+- 评估端不再提供 `--train-feature-cache` 和 `--recompute-train-features`；原命令中的这两个选项应移除，改为指定 `--classifier-dir`。
+- 即使命中特征缓存，当前脚本仍初始化 BEATs 提取器，因此模型文件和运行依赖仍然必需。
 - 同一输出目录中的指标、预测和同名曲线会被覆盖；旧的、不参与本次运行的曲线不会自动删除。
 
 ### FAR/FRR 与 EER 口径
@@ -287,9 +286,11 @@ python scripts/evaluate_classifier_backends.py `
 | 加载模型出现 `size mismatch` | 检查模型配置与权重结构是否匹配。当前特征提取器从 Lightning 配置重建模型时将 `embed_dim` 固定为 512；从零训练修改过该值时需先适配特征提取器 |
 | 提示只支持二分类或无法定位正类 | 确认目录中只有目标的两个类别，且 `--positive-label` 与文件夹名称一致 |
 | AUC/pAUC 报错或出现 NaN | 检查测试集是否同时含两类，特别是设置样本上限后；也应确认训练集同时含两类 |
-| 更换模型后结果没有变化 | 检查是否复用了旧特征缓存，更换输出目录且不引用旧缓存，或同时追加 `--recompute-train-features --recompute-test-features` |
+| 更换模型后结果没有变化 | 检查是否复用了旧特征缓存，用新模型重新训练后端，并追加 `--recompute-test-features` 更新测试特征 |
 | CUDA 不可用或显存不足 | 无 CUDA 时改用 `--device cpu`；显存不足时减小两个批量，或先对长音频切片 |
 | 找不到音频 | 检查 `train/类别/音频`、`test/类别/音频` 的层级、扩展名和路径，类别目录下更深层的文件不会被扫描 |
+| 找不到分类器 `.pkl` | 先运行训练脚本的 `--classifier all`，或用 `--classifiers` 只选择已有模型；检查 `--classifier-dir` 是否指向训练输出目录 |
+| 分类器类别与测试集不一致 | 使用相同类别名称训练后端，或选择与测试集匹配的模型目录 |
 | 只有三行指标或出现旧 ROC 图 | 检查是否跳过了原生分类头；确认使用独立输出目录，旧 ROC 文件不会自动清理 |
 
 ## 9. 相关入口
