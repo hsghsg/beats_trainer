@@ -1,0 +1,42 @@
+model: # PyTorch 源模型
+  kind: beats # beats：项目 BEATs；torchscript：torch.jit 保存的模型；python_factory：自定义网络
+  checkpoint: ../asd/models/beats.ckpt # 支持 BEATs .pt 和项目 .ckpt，相对本配置文件解析
+  output_mode: both # BEATs 输出：embedding、probabilities、both；原始预训练 .pt 选 embedding
+  normalize_embedding: true # embedding 输出是否 L2 归一化，与 ASD 后端训练保持一致
+  labels: [abnormal, normal] # 原生分类头输出列的训练标签顺序，仅作为输出元数据
+  backbone_overrides: {} # 特殊 BEATs 网络结构参数，须与训练一致
+  fbank_mean: 15.41663 # 输入特征均值，归一化由导出模型内部执行
+  fbank_std: 6.55582 # 特征标准差，内部除以 2*std
+  max_tokens: 4096 # BEATs 最大输入 token 数，防止导出过程内存耗尽
+  factory: null # python_factory 时为 module:function，函数返回 torch.nn.Module
+  factory_kwargs: {} # 传递给自定义网络构建函数的关键字参数
+  state_dict_key: null # 自定义 checkpoint 的 state_dict 字段名；null 表示整个文件为 state_dict
+input: # 固定输入契约；本版不导出动态 shape
+  name: features # ONNX 输入张量名称
+  shape: [1, 998, 128] # 十秒 16 kHz log-mel 特征为 [batch,time,mel_bins]，不是原始 PCM
+  dtype: float32 # 当前仅支持 float32 输入
+  sample_npy: null # 可选真实输入 .npy；null 使用可复现的随机输入执行验证
+onnx: # ONNX 产物及数值验证
+  path: outputs/beats.onnx # ONNX 输出路径，也用于单独 ONNX→OM 的输入
+  opset: 17 # 标准 ONNX 算子集版本，需与安装的 ATC 支持范围匹配
+  output_names: [embedding, probabilities] # 必须与实际模型输出数量一致
+  verify: true # 使用 ONNX Runtime 对照 PyTorch 数值，不通过则不发布新模型
+  atol: 0.0001 # 绝对误差容限
+  rtol: 0.001 # 相对误差容限
+  validation_runs: 2 # 校验输入次数；首个可为 sample_npy，其余为随机输入
+atc: # 昇腾 CANN ATC 编译配置
+  executable: atc # ATC 可执行文件名称或 Linux 绝对路径
+  env_script: /home/robo/Ascend/cann/set_env.sh # CANN 环境脚本；null 表示使用已激活环境
+  devlib_path: /home/robo/Ascend/cann/x86_64-linux/devlib # 无 NPU 的 WSL 离线编译库目录；有设备时可设 null
+  soc_version: Ascend310B1 # 用户指定目标芯片，须与目标设备及安装的 CANN 支持范围匹配
+  output: outputs/beats # OM 输出前缀，不包含 .om 扩展名
+  input_format: ND # BEATs 三维特征使用 ND；图像网络按其要求配置 NCHW 等
+  precision_mode: null # 可选 ATC 精度参数；null 使用当前 CANN 默认值
+  extra_args: {} # 额外 ATC 参数映射，如 log: info；不得覆盖核心参数
+  timeout_seconds: 1800 # 编译超时秒数，超时终止 ATC 进程组
+runtime: # 转换运行设置
+  num_threads: 4 # PyTorch/ONNX Runtime CPU 线程数
+  seed: 42 # 随机验证输入种子
+  overwrite: false # 是否替换既有成功产物，默认拒绝覆盖
+  report_path: outputs/conversion_report.json # 转换结果/错误报告，按每次命令更新
+  log_path: outputs/transfer.log # 中文日志，追加写入

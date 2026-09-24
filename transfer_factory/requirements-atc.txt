@@ -1,0 +1,7 @@
+# CANN 9.1.1 ATC 在 Ubuntu 22.04 / Python 3.10 下验证的额外依赖。
+# 先安装 requirements.txt，再安装本文件；te/tbe 使用官方 CANN 提供的包。
+-r requirements.txt
+decorator==5.3.1
+attrs==26.1.0
+psutil==7.2.2
+absl-py==2.5.0
