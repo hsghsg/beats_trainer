@@ -32,12 +32,14 @@ if SRC_DIR.exists() and str(SRC_DIR) not in sys.path:
 
 from beats_trainer import BEATsFeatureExtractor, Config  # noqa: E402
 from beats_trainer.classifiers import (  # noqa: E402
+    BaseEmbeddingClassifier,
     GMMCosineKNNHybridClassifier,
     LocalDensityKNNClassifier,
     RelativeMahalanobisDistanceClassifier,
 )
 from beats_trainer.core.model import BEATsLightningModule  # noqa: E402
 from train_mimii_embedding_classifier import (  # noqa: E402
+    CLASSIFIER_CHOICES,
     apply_file_limit,
     collect_audio_files,
     extract_split_features,
@@ -62,8 +64,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--test-dir", type=Path, help="新的测试集目录；指定后只重算测试特征。")
     parser.add_argument(
-        "--train-feature-cache", type=Path,
-        help="复用已有训练特征 NPZ，可指向其他评估输出目录；模型和训练数据须一致。",
+        "--classifier-dir", type=Path,
+        default=Path("artifacts") / "mimii_embedding_classifier",
+        help="训练脚本保存的分类器目录，其中包含 <后端名称>.pkl。",
+    )
+    parser.add_argument(
+        "--classifiers", nargs="+", choices=CLASSIFIER_CHOICES,
+        default=list(CLASSIFIER_CHOICES),
+        help="需要加载评估的后端，默认全部三个；可仅指定已经训练好的后端。",
     )
     parser.add_argument(
         "--native-checkpoint",
@@ -86,11 +94,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--recompute-features", "--recompute-test-features",
         dest="recompute_features", action="store_true",
-        help="重新提取测试集特征，保留训练集缓存。",
-    )
-    parser.add_argument(
-        "--recompute-train-features", action="store_true",
-        help="显式重新提取训练集特征；更换特征模型或训练数据时使用。",
+        help="重新提取测试集特征；不训练或修改已保存的分类器。",
     )
     parser.add_argument("--skip-native", action="store_true")
     return parser.parse_args()
@@ -327,35 +331,65 @@ def evaluate_native_backend(
     return result
 
 
-def build_embedding_classifiers() -> dict[str, Any]:
-    """创建三个自定义 embedding 后端分类器。"""
-    return {
-        "local-density-knn": LocalDensityKNNClassifier(k=15, density_k=20),
-        "relative-mahalanobis": RelativeMahalanobisDistanceClassifier(
-            covariance_type="diag",
-            regularization=1e-4,
-        ),
-        "gmm-cosine-knn": GMMCosineKNNHybridClassifier(
-            n_components=4,
-            knn_k=15,
-            alpha=0.6,
-            random_state=42,
-        ),
+def load_embedding_classifiers(
+    classifier_dir: Path,
+    backend_names: list[str],
+    classes: np.ndarray,
+) -> dict[str, BaseEmbeddingClassifier]:
+    """从训练输出目录加载所选分类器，校验类型、拟合状态和测试类别，不进行拟合。
+
+    Args:
+        classifier_dir: 包含训练脚本输出的 <后端名称>.pkl 的目录。
+        backend_names: 要评估的后端名称列表。
+        classes: 当前二分类测试集的类别数组。
+
+    Returns:
+        按请求顺序组织的后端名称与已拟合分类器映射，重复名称只加载一次。
+
+    Raises:
+        FileNotFoundError: 所选后端的模型文件不存在。
+        TypeError: 文件中的分类器类型与后端名称不匹配。
+        ValueError: 后端名称无效、模型未拟合或模型类别与测试集不一致。
+    """
+    expected_types = {
+        "local-density-knn": LocalDensityKNNClassifier,
+        "relative-mahalanobis": RelativeMahalanobisDistanceClassifier,
+        "gmm-cosine-knn": GMMCosineKNNHybridClassifier,
     }
+    classifiers: dict[str, BaseEmbeddingClassifier] = {}
+    for backend_name in dict.fromkeys(backend_names):
+        if backend_name not in expected_types:
+            raise ValueError(f"不支持的分类器后端：{backend_name}")
+        model_path = classifier_dir / f"{backend_name}.pkl"
+        if not model_path.is_file():
+            raise FileNotFoundError(
+                f"分类器文件不存在：{model_path}。请先运行 "
+                "scripts/train_mimii_embedding_classifier.py --classifier all "
+                f'--output-dir "{classifier_dir}"，或用 --classifiers 选择已有后端。'
+            )
+        classifier = BaseEmbeddingClassifier.load(model_path)
+        if not isinstance(classifier, expected_types[backend_name]):
+            raise TypeError(f"分类器文件类型与后端 {backend_name} 不匹配：{model_path}")
+        if classifier.classes_ is None:
+            raise ValueError(f"分类器尚未拟合：{model_path}")
+        if not np.array_equal(np.sort(classifier.classes_), np.sort(classes)):
+            raise ValueError(
+                f"分类器 {backend_name} 的类别 {classifier.classes_} 与测试集 {classes} 不一致。"
+            )
+        classifiers[backend_name] = classifier
+        print(f"已加载分类器：{model_path}")
+    return classifiers
 
 
 def evaluate_embedding_backend(
     backend_name: str,
     classifier: Any,
-    train_features: np.ndarray,
-    train_labels: np.ndarray,
     test_features: np.ndarray,
     test_labels: np.ndarray,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    """训练一个自定义 embedding 后端并在测试集上评估。"""
-    print(f"开始训练后端分类器：{backend_name}")
-    classifier.fit(train_features, train_labels)
+    """使用已加载的自定义 embedding 分类器直接预测测试集并计算指标，不再拟合。"""
+    print(f"开始评估已加载分类器：{backend_name}")
     probabilities = classifier.predict_proba(test_features)
     predictions = classifier.predict(test_features)
     positive_index = get_positive_index(np.asarray(classifier.classes_), args.positive_label)
@@ -679,37 +713,25 @@ def main() -> None:
     if data_dir is None or output_dir is None or embedding_model_path is None:
         raise ValueError("data-dir、output-dir、embedding checkpoint 都不能为空。")
 
-    train_dir = data_dir / "train"
     test_dir = resolve_project_path(args.test_dir) or data_dir / "test"
     device = resolve_device(args.device)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_paths, train_labels = collect_audio_files(train_dir)
     test_paths, test_labels = collect_audio_files(test_dir)
-    train_paths, train_labels = apply_file_limit(train_paths, train_labels, args.max_files_per_split)
     test_paths, test_labels = apply_file_limit(test_paths, test_labels, args.max_files_per_split)
-    classes = validate_binary_labels(np.concatenate([train_labels, test_labels]), args.positive_label)
+    classes = validate_binary_labels(test_labels, args.positive_label)
+    classifier_dir = resolve_project_path(args.classifier_dir)
+    if classifier_dir is None:
+        raise ValueError("分类器目录不能为空。")
+    classifiers = load_embedding_classifiers(classifier_dir, args.classifiers, classes)
 
     print(f"使用设备：{device}")
     print(f"类别顺序：{classes.tolist()}，正类：{args.positive_label}")
-    print(f"训练集样本数：{len(train_labels)}，测试集样本数：{len(test_labels)}")
+    print(f"测试集样本数：{len(test_labels)}")
     print(f"embedding checkpoint：{embedding_model_path}")
 
     cache_tag = "all" if args.max_files_per_split is None else f"max{args.max_files_per_split}"
-    train_cache = resolve_project_path(args.train_feature_cache)
-    if train_cache is not None and not train_cache.exists() and not args.recompute_train_features:
-        raise FileNotFoundError(f"指定的训练特征缓存不存在：{train_cache}")
-    train_cache = train_cache or output_dir / "features" / f"train_features_{cache_tag}.npz"
     extractor = BEATsFeatureExtractor(model_path=embedding_model_path, device=str(device), pooling="mean")
-    train_features, train_labels, _ = extract_split_features(
-        extractor,
-        "train",
-        train_dir,
-        train_cache,
-        args.extract_batch_size,
-        args.max_files_per_split,
-        args.recompute_train_features,
-    )
     test_features, test_labels, test_path_strings = extract_split_features(
         extractor,
         "test",
@@ -730,13 +752,11 @@ def main() -> None:
         else:
             results.append(evaluate_native_backend(native_checkpoint, test_dir, classes, args, device))
 
-    for backend_name, classifier in build_embedding_classifiers().items():
+    for backend_name, classifier in classifiers.items():
         results.append(
             evaluate_embedding_backend(
                 backend_name,
                 classifier,
-                train_features,
-                train_labels,
                 test_features,
                 test_labels,
                 args,
